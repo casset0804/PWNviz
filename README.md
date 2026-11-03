@@ -11,7 +11,7 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
 
 ---
 
-## 当前状态：Phase 2（真实 GDB 调试链路 + 核心前端可视化）
+## 当前状态：Phase 3（实时调试工作台）
 
 已完成：
 
@@ -42,25 +42,40 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
   - 点击 byte cell 检查地址/字节/qword/ASCII；点击 RSP/RBP 滚动到对应行；
   - 点击汇编行仅选择，不创建断点；
   - 真实 WebSocket 推送驱动更新，断线重连，REST 动作与 WS 事件去重；
+- **Phase 3 实时工作台**：
+  - Toolbar：Run、Continue、Pause、Step Instruction、Next Instruction、Step Into、
+    Step Over、Finish、Restart；
+  - 状态栏：Initializing / Running / Stopped / Exited / Error；
+  - 统一 WS 事件壳：`session.state` / `snapshot` / `debugger.output` /
+    `debugger.error` / `breakpoints.updated` / `session.terminated`；
+  - 处理断线重连、后端重启、session 不存在、重复事件和 stale snapshot
+    （较小 snapshot_id 不覆盖新快照）；
+  - Debug Log 显示真实 GDB/MI 命令/控制台输出，不参与核心解析；
+  - Instruction Explanation 规则：push / pop / mov / sub rsp / add rsp / call /
+    ret / leave / nop，结合 before/after 寄存器与内存差异；未知指令只显示
+    “已执行，请观察状态变化”；
+  - 不把 RBP 讲成固定栈底，也不把 RSP–RBP 空间硬编码为局部变量；
 - React + TypeScript + Vite + Tailwind + Zustand 深色 IDE 工作台；
 - 本机安全护栏：非 loopback 绑定默认拒绝、HTTP/WS 非 loopback 客户端中间件、
   `Host` 白名单、跨站浏览器请求拒绝、CORS 收紧、子进程组超时清理；
 - 生命周期清理：DELETE/取消/退出/reader 失败均回收 GDB，WebSocket 队列有界；
 - 单元测试与真实环境集成测试（pytest 110 passed，含真实 GDB 会话与 MI 控制器测试）；
-- CDP E2E：`scripts/ui_smoke.mjs` 真实点击 Run/StepI、
-  检查栈/寄存器/diff/terminate；前端单测 13 passed；
+- CDP E2E：`scripts/ui_smoke.mjs` 真实跑通
+  main → StepI → Step Into add_numbers → RSP 变化 → Finish → Continue 退出 →
+  Restart，页面不刷新；前端单测 23 passed；
 - 环境检查脚本在本机 0 failure / 0 warning。
 
-![Phase 2 工作台（真实 GDB 会话）](docs/assets/workbench-phase2.png)
+![Phase 3 工作台（真实 GDB 会话）](docs/assets/workbench-phase2.png)
 
 > 截图来自真实 GDB 会话：RSP、RBP、RIP 与栈字节均来自后端 Snapshot；
-> 高亮的 `0a` 是 StepI 后 diff 检测到的真实栈字节变化。
+> 状态栏与断点来自 WebSocket 事件；高亮的 `0a` 是 StepI 后 diff 检测到的真实
+> 栈字节变化。
 
 尚未实现（后续阶段）：
 
-- 断点增删、源码视图、DWARF 变量/类型语义（Phase 3/4）；
+- 断点增删 API、源码视图、DWARF 变量/类型语义（Phase 4）；
 - 快照历史时间轴回放；
-- 更完整的指令解释规则（当前只陈述实测 before/after）。
+- 更完整的指令解释规则（当前只覆盖有限常用指令）。
 
 阶段计划与验收标准见 [docs/PHASES.md](docs/PHASES.md)。
 

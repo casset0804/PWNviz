@@ -78,8 +78,10 @@ export function Toolbar({ samples, connection, ready }: ToolbarProps) {
   const pause = useDebugStore((state) => state.pause);
   const stepInstruction = useDebugStore((state) => state.stepInstruction);
   const nextInstruction = useDebugStore((state) => state.nextInstruction);
+  const stepSource = useDebugStore((state) => state.stepSource);
   const nextSource = useDebugStore((state) => state.nextSource);
   const finish = useDebugStore((state) => state.finish);
+  const restartSession = useDebugStore((state) => state.restartSession);
   const terminate = useDebugStore((state) => state.terminate);
 
   const canStart = !session && !busy && Boolean(selectedSampleId) && ready;
@@ -187,6 +189,7 @@ export function Toolbar({ samples, connection, ready }: ToolbarProps) {
           emphasis
           disabled={!canStep}
           onClick={() => void stepInstruction()}
+          title="Step Instruction — execute one machine instruction"
         />
         <ActionButton
           label="NextI"
@@ -194,13 +197,23 @@ export function Toolbar({ samples, connection, ready }: ToolbarProps) {
           testId="next-instruction"
           disabled={!canStep}
           onClick={() => void nextInstruction()}
+          title="Next Instruction — execute one instruction, stepping over calls"
         />
         <ActionButton
-          label="Next"
+          label="Step Into"
+          shortcut="i"
+          testId="step-into"
+          disabled={!canStep}
+          onClick={() => void stepSource()}
+          title="Step Into — source-level step into calls"
+        />
+        <ActionButton
+          label="Step Over"
           shortcut="o"
-          testId="next-source"
+          testId="step-over"
           disabled={!canStep}
           onClick={() => void nextSource()}
+          title="Step Over — source-level step over calls"
         />
         <ActionButton
           label="Finish"
@@ -208,6 +221,13 @@ export function Toolbar({ samples, connection, ready }: ToolbarProps) {
           testId="finish"
           disabled={!canStep}
           onClick={() => void finish()}
+        />
+        <ActionButton
+          label="Restart"
+          testId="restart"
+          disabled={!session || busy}
+          onClick={() => void restartSession()}
+          title="Delete this session and start a fresh run at main"
         />
         <ActionButton
           label="Terminate"

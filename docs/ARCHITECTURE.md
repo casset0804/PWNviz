@@ -93,22 +93,24 @@ ready = gdb.available
 src/
 ├── app/Workbench.tsx          3 栏 IDE 布局 + 底部 Dock + 状态栏
 ├── components/
-│   ├── Toolbar/               目标选择、状态、Run/Continue/Pause/StepI/NextI/Next/Finish/Terminate
-│   ├── DisassemblyView/       快照反汇编、RIP 高亮、点击选择
+│   ├── Toolbar/               目标、Run/Continue/Pause/StepI/NextI/Step Into/Step Over/Finish/Restart
+│   ├── StatusBar/             Initializing/Running/Stopped/Exited/Error、RIP、breakpoint
+│   ├── DisassemblyView/       快照反汇编、RIP 高亮、断点 marker、点击选择
 │   ├── StackMemoryView/       地址/8 byte cells/qword/ASCII/RSP/RBP/changed/unknown
 │   ├── RegisterPanel/         真实寄存器 + changed before→after
 │   ├── MemoryInspector/       选中 byte 的地址、值、qword、ASCII、diff
 │   ├── DiffPanel/             寄存器与绝对地址字节级 diff
-│   ├── ExplanationPanel/      仅陈述实测 before/after，不模拟指令
+│   ├── ExplanationPanel/      有限规则 + 实测 before/after，不模拟未知指令
 │   ├── EnvironmentPanel/      真实探测结果（GDB/pwndbg/样例/警告）
-│   ├── DebugLogPanel/         session/WS/action 事件
+│   ├── DebugLogPanel/         GDB/MI 输出、WS/action 事件
 │   └── BottomDock/            Memory / Diff / Explanation / Log / Environment
 ├── hooks/useCapabilities.ts   探测请求、verify pwndbg、错误状态
 ├── hooks/useSamples.ts        样例列表
 ├── lib/address.ts             地址解析/格式化/比较（BigInt，无 Number 地址）
 ├── lib/snapshot.ts            同一 snapshot 派生 marker/选中 cell/previous 值
+├── lib/explain.ts             push/pop/mov/sub rsp/add rsp/call/ret/leave/nop
 ├── services/api.ts            REST + WebSocket URL，统一错误映射
-├── stores/debugStore.ts       Zustand 单一 debug 状态 + WS 重连/去重
+├── stores/debugStore.ts       Zustand 单一 debug 状态 + WS 重连/去重/状态单调性
 └── types/api.ts, debug.ts     与后端 schema 对齐的类型
 ```
 
@@ -240,8 +242,13 @@ Phase 1 已提供 REST + WebSocket：
 | `session.state` | 状态变化、stop_reason、last_error | 已实现 |
 | `snapshot` | 完整快照（寄存器、frames、stack、instruction、diff） | 已实现 |
 | `debugger.error` | 命令/采集失败消息 | 已实现 |
+| `debugger.output` | GDB/MI 可读输出，`stream` + `text` + 单调 `seq` | 已实现 |
+| `breakpoints.updated` | 初始断点列表 | 已实现（暂无增删 API） |
 | `session.terminated` | 清理完成 | 已实现 |
-| `debugger.output` | 原始 MI 控制台文本 | 预留（控制器保留 recent output，不推流） |
+
+快照消息按 `snapshot_id` 单调接受；较小 id 不覆盖当前快照。输出消息按 `seq`
+去重。状态更新在客户端做终态单调保护（EXITED/ERROR/TERMINATED 不被晚到的
+RUNNING/STOPPED 覆盖）。
 
 地址一律十六进制字符串；字节用 2 位 hex 字符串或 `null`（不可读）；
 时间 ISO-8601 UTC。

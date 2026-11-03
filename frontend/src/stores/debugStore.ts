@@ -4,6 +4,7 @@ import * as api from "../services/api";
 import { ApiError } from "../services/api";
 import type {
   ActionName,
+  Breakpoint,
   DebuggerState,
   SessionInfo,
   Snapshot,
@@ -12,7 +13,7 @@ import type {
 
 export type BottomTab = "environment" | "memory" | "diff" | "explanation" | "log";
 export type StreamStatus = "closed" | "connecting" | "open" | "reconnecting";
-export type LogLevel = "info" | "event" | "error";
+export type LogLevel = "info" | "event" | "error" | "gdb";
 
 export interface LogEntry {
   id: number;
@@ -33,6 +34,9 @@ interface DebugStore {
   snapshot: Snapshot | null;
   previousSnapshot: Snapshot | null;
   history: Snapshot[];
+  breakpoints: Breakpoint[];
+  lastAction: ActionName | null;
+  lastOutputSeq: number;
   selectedByteAddress: string | null;
   selectedInstructionAddress: string | null;
   scrollTarget: ScrollTarget | null;
@@ -62,6 +66,7 @@ interface DebugStore {
   stepSource: () => Promise<void>;
   nextSource: () => Promise<void>;
   finish: () => Promise<void>;
+  restartSession: () => Promise<void>;
   terminate: () => Promise<void>;
 }
 
@@ -80,6 +85,24 @@ const KNOWN_STATES: ReadonlySet<string> = new Set([
 function normalizeState(value: string | null | undefined): DebuggerState {
   const upper = (value ?? "").toUpperCase();
   return KNOWN_STATES.has(upper) ? (upper as DebuggerState) : "IDLE";
+}
+
+const TERMINAL_STATES: ReadonlySet<DebuggerState> = new Set([
+  "EXITED",
+  "TERMINATED",
+  "ERROR",
+]);
+
+function reconcileState(
+  current: DebuggerState,
+  next: DebuggerState,
+): DebuggerState {
+  // A late REST response or duplicate WS message must not move a terminal
+  // session back to RUNNING/STOPPED.
+  if (TERMINAL_STATES.has(current) && !TERMINAL_STATES.has(next)) {
+    return current;
+  }
+  return next;
 }
 
 function errorMessage(error: unknown): string {
@@ -101,6 +124,38 @@ function readAnimationPreference(): boolean {
   }
 }
 
+function stripAnsi(value: string): string {
+  return value.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+}
+
+function parseBreakpoints(payload: Record<string, unknown>): Breakpoint[] {
+  const raw = payload.breakpoints;
+  if (!Array.isArray(raw)) return [];
+  const breakpoints: Breakpoint[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const candidate = item as Record<string, unknown>;
+    const line =
+      typeof candidate.line === "number"
+        ? candidate.line
+        : typeof candidate.line === "string" && candidate.line.trim()
+          ? Number(candidate.line)
+          : null;
+    breakpoints.push({
+      number: typeof candidate.number === "string" ? candidate.number : null,
+      address: typeof candidate.address === "string" ? candidate.address : null,
+      function: typeof candidate.function === "string" ? candidate.function : null,
+      file: typeof candidate.file === "string" ? candidate.file : null,
+      line:
+        line !== null && Number.isFinite(line)
+          ? line
+          : null,
+      enabled: candidate.enabled !== false,
+    });
+  }
+  return breakpoints;
+}
+
 let logSequence = 0;
 let socket: WebSocket | null = null;
 let reconnectTimer: number | null = null;
@@ -114,6 +169,9 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
   snapshot: null,
   previousSnapshot: null,
   history: [],
+  breakpoints: [],
+  lastAction: null,
+  lastOutputSeq: 0,
   selectedByteAddress: null,
   selectedInstructionAddress: null,
   scrollTarget: null,
@@ -183,6 +241,9 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
         snapshot: null,
         previousSnapshot: null,
         history: [],
+        breakpoints: [],
+        lastAction: "launch",
+        lastOutputSeq: 0,
         selectedByteAddress: null,
         selectedInstructionAddress: null,
         scrollTarget: null,
@@ -213,12 +274,23 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
       return;
     }
     if (get().busy) return;
-    set({ busy: true, error: null });
+    set({ busy: true, error: null, lastAction: "launch" });
     try {
       const launched = await api.launchSession(session.session_id);
       applyActionResponse(launched);
       const info = await api.fetchSession(session.session_id).catch(() => null);
-      if (info) set({ session: info });
+      if (info) {
+        set((state) => {
+          const effective = reconcileState(
+            state.debuggerState,
+            normalizeState(info.state),
+          );
+          return {
+            session: { ...info, state: effective },
+            debuggerState: effective,
+          };
+        });
+      }
     } catch (error) {
       set({ error: errorMessage(error) });
       get().appendLog("error", errorMessage(error));
@@ -248,6 +320,9 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
         snapshot: latest,
         previousSnapshot: previous,
         history: ordered.slice(-200),
+        breakpoints: [],
+        lastAction: null,
+        lastOutputSeq: 0,
         selectedByteAddress: null,
         selectedInstructionAddress: null,
         scrollTarget: null,
@@ -277,6 +352,48 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
   nextSource: () => runAction("next"),
   finish: () => runAction("finish"),
 
+  restartSession: async () => {
+    const session = get().session;
+    if (!session || get().busy) return;
+    const sampleId = session.sample_id || get().selectedSampleId;
+    set({ busy: true, error: null });
+    get().appendLog("info", "restarting session");
+    try {
+      await api.deleteSession(session.session_id);
+    } catch (error) {
+      if (!(error instanceof ApiError && error.status === 404)) {
+        const message = `restart failed: ${errorMessage(error)}`;
+        set({ error: message, busy: false });
+        get().appendLog("error", message);
+        // Keep the old session; never start a second GDB while DELETE is
+        // unconfirmed.
+        return;
+      }
+    }
+
+    closeStream(true);
+    set({
+      session: null,
+      debuggerState: "IDLE",
+      snapshot: null,
+      previousSnapshot: null,
+      history: [],
+      breakpoints: [],
+      lastAction: null,
+      lastOutputSeq: 0,
+      selectedByteAddress: null,
+      selectedInstructionAddress: null,
+      scrollTarget: null,
+      streamStatus: "closed",
+      busy: false,
+      error: null,
+      bottomTab: "memory",
+      selectedSampleId: sampleId,
+    });
+    window.history.replaceState(null, "", window.location.pathname);
+    await get().startSession();
+  },
+
   terminate: async () => {
     const session = get().session;
     if (!session) return;
@@ -304,6 +421,9 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
       snapshot: null,
       previousSnapshot: null,
       history: [],
+      breakpoints: [],
+      lastAction: null,
+      lastOutputSeq: 0,
       selectedByteAddress: null,
       selectedInstructionAddress: null,
       scrollTarget: null,
@@ -321,7 +441,7 @@ async function runAction(action: ActionName): Promise<void> {
   const current = useDebugStore.getState();
   if (!current.session || current.busy) return;
 
-  useDebugStore.setState({ busy: true, error: null });
+  useDebugStore.setState({ busy: true, error: null, lastAction: action });
   current.appendLog("info", `action ${action}`);
   try {
     const response = await api.sendAction(current.session.session_id, action);
@@ -329,7 +449,14 @@ async function runAction(action: ActionName): Promise<void> {
     const info = await api.fetchSession(current.session.session_id).catch(() => null);
     const state = useDebugStore.getState();
     if (info && state.session?.session_id === current.session.session_id) {
-      useDebugStore.setState({ session: info });
+      const effective = reconcileState(
+        state.debuggerState,
+        normalizeState(info.state),
+      );
+      useDebugStore.setState({
+        session: { ...info, state: effective },
+        debuggerState: effective,
+      });
     }
   } catch (error) {
     const message = errorMessage(error);
@@ -350,7 +477,7 @@ function applyActionResponse(response: {
   if (!current.session || current.session.session_id !== response.session_id) return;
   const nextState = normalizeState(response.state);
   useDebugStore.setState({
-    debuggerState: nextState,
+    debuggerState: reconcileState(current.debuggerState, nextState),
     session: { ...current.session, state: nextState },
   });
   if (response.snapshot) {
@@ -390,8 +517,8 @@ async function refreshSessionSilently(): Promise<void> {
     const current = useDebugStore.getState();
     if (!current.session || current.session.session_id !== info.session_id) return;
     useDebugStore.setState({
-      session: info,
-      debuggerState: normalizeState(info.state),
+      session: { ...info, state: reconcileState(current.debuggerState, normalizeState(info.state)) },
+      debuggerState: reconcileState(current.debuggerState, normalizeState(info.state)),
     });
   } catch {
     // The stream reconnect loop handles transient backend outages.
@@ -444,26 +571,58 @@ function handleStreamMessage(sessionId: string, raw: string): void {
     const nextState = normalizeState(
       typeof payload.state === "string" ? payload.state : undefined,
     );
-    useDebugStore.setState((state) => ({
-      debuggerState: nextState,
-      session: state.session
-        ? {
-            ...state.session,
-            state: nextState,
-            stop_reason:
-              typeof payload.stop_reason === "string"
-                ? payload.stop_reason
-                : state.session.stop_reason,
-            last_error:
-              typeof payload.last_error === "string"
-                ? payload.last_error
-                : state.session.last_error,
-          }
-        : state.session,
-    }));
+    useDebugStore.setState((state) => {
+      const effective = reconcileState(state.debuggerState, nextState);
+      return {
+        debuggerState: effective,
+        session: state.session
+          ? {
+              ...state.session,
+              state: effective,
+              stop_reason:
+                typeof payload.stop_reason === "string"
+                  ? payload.stop_reason
+                  : state.session.stop_reason,
+              last_error:
+                typeof payload.last_error === "string"
+                  ? payload.last_error
+                  : state.session.last_error,
+            }
+          : state.session,
+      };
+    });
+    if (nextState === "TERMINATED") {
+      closeStream(true);
+    }
     useDebugStore
       .getState()
       .appendLog("event", `session.state ${nextState}`);
+    return;
+  }
+
+  if (event.type === "debugger.output") {
+    const text = typeof payload.text === "string" ? payload.text : "";
+    const stream = typeof payload.stream === "string" ? payload.stream : "output";
+    const seq = typeof payload.seq === "number" ? payload.seq : null;
+    const current = useDebugStore.getState();
+    if (seq !== null && seq <= current.lastOutputSeq) {
+      return;
+    }
+    const clean = stripAnsi(text).trim();
+    if (!clean) return;
+    if (seq !== null) {
+      useDebugStore.setState({ lastOutputSeq: seq });
+    }
+    current.appendLog("gdb", `${stream}: ${clean.slice(0, 900)}`);
+    return;
+  }
+
+  if (event.type === "breakpoints.updated") {
+    const breakpoints = parseBreakpoints(payload);
+    useDebugStore.setState({ breakpoints });
+    useDebugStore
+      .getState()
+      .appendLog("event", `breakpoints.updated (${breakpoints.length})`);
     return;
   }
 
@@ -512,7 +671,7 @@ function openStream(sessionId: string, resetAttempts = false): void {
   nextSocket.onmessage = (event) => {
     handleStreamMessage(sessionId, String(event.data));
   };
-  nextSocket.onclose = () => {
+  nextSocket.onclose = (event) => {
     if (socket !== nextSocket) return;
     socket = null;
     if (intentionalClose) {
@@ -520,6 +679,19 @@ function openStream(sessionId: string, resetAttempts = false): void {
       return;
     }
     const current = useDebugStore.getState();
+    if (event.code === 4404) {
+      const message = "session no longer exists on the backend (restarted?)";
+      useDebugStore.setState((state) => ({
+        streamStatus: "closed",
+        debuggerState: "ERROR",
+        session: state.session
+          ? { ...state.session, state: "ERROR", last_error: message }
+          : state.session,
+        error: message,
+      }));
+      useDebugStore.getState().appendLog("error", message);
+      return;
+    }
     if (
       !current.session ||
       current.session.session_id !== sessionId ||

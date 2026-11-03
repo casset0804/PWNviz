@@ -51,6 +51,9 @@ class FakeGdbProcess:
     def wait_exit(self, timeout: float) -> bool:
         return True
 
+    def kill(self) -> None:
+        self.alive = False
+
     def close(self, *, timeout: float = 3.0) -> None:
         self.closed = True
         self.alive = False
@@ -63,8 +66,13 @@ async def test_reader_failure_marks_controller_fatal_and_wakes_waiters() -> None
     try:
         fake.fail_reads = True
 
-        event = await asyncio.wait_for(controller.next_event(), timeout=3)
-        assert event["type"] == "error"
+        event = None
+        for _ in range(20):
+            candidate = await asyncio.wait_for(controller.next_event(), timeout=3)
+            if candidate["type"] == "error":
+                event = candidate
+                break
+        assert event is not None, "reader failure did not produce an error event"
         assert "broken MI pipe" in event["message"]
 
         with pytest.raises(MIError):
@@ -78,6 +86,9 @@ async def test_reader_failure_marks_controller_fatal_and_wakes_waiters() -> None
 class DeadGdbProcess:
     pid = None
     alive = False
+
+    def kill(self) -> None:
+        return None
 
     def close(self, *, timeout: float = 3.0) -> None:
         return None

@@ -1,4 +1,4 @@
-# API 参考（Phase 0 / Phase 1）
+# API 参考（Phase 3）
 
 Base URL：`http://127.0.0.1:8000`（WSL 内 uvicorn）。
 前端开发服务器 `http://127.0.0.1:5173` 通过 Vite proxy 转发 `/api` 与 `/health`。
@@ -373,7 +373,10 @@ GDB 启动/命令失败 → `502 debugger_error`，会话进入 `ERROR` 并回�
 - 默认还要求客户端为 loopback；非 loopback 以 `4403` 关闭（除非
   `PWNVIZ_ALLOW_REMOTE=1`）；
 - 连接后先推当前 `session.state`，若有历史再推最近一条 `snapshot`；
-- 之后实时推送状态/快照；DELETE 时推送 `session.terminated` 后关闭；
+  若已创建初始断点，再推 `breakpoints.updated`；
+- 之后实时推送状态/快照/GDB 输出/断点/终止事件；
+- 客户端必须忽略 `snapshot_id` 小于当前快照的旧消息；重复消息应幂等处理；
+- DELETE 时推送 `session.terminated` 后关闭；
 - 每订阅队列上限 256 条；慢客户端满队列时丢弃最旧事件，保留最新状态。
 
 事件结构：`{"type": "...", "session_id": "...", "payload": {...}}`。
@@ -386,6 +389,21 @@ GDB 启动/命令失败 → `502 debugger_error`，会话进入 `ERROR` 并回�
 
 ```json
 {"type":"snapshot","session_id":"sess_...","payload":{ "...": "完整 Snapshot" }}
+```
+
+```json
+{"type":"debugger.output","session_id":"sess_...","payload":{
+  "stream":"mi|console|log|output|target",
+  "text":"Breakpoint 1, main () at demo.c:10",
+  "seq":42}}
+```
+
+`seq` 单调递增；客户端可用它丢弃重连后重复的旧日志。
+
+```json
+{"type":"breakpoints.updated","session_id":"sess_...","payload":{
+  "breakpoints":[{"number":"1","address":"0x0000000000401160",
+    "function":"main","file":".../demo.c","line":10,"enabled":true}]}}
 ```
 
 `session.terminated`：`{"type":"session.terminated","payload":{"state":"TERMINATED"}}`。

@@ -124,6 +124,15 @@ export interface SnapshotsResponse {
   snapshots: Snapshot[];
 }
 
+export interface Breakpoint {
+  number: string | null;
+  address: string | null;
+  function: string | null;
+  file: string | null;
+  line: number | null;
+  enabled: boolean;
+}
+
 export interface StreamEvent {
   type: string;
   session_id: string;

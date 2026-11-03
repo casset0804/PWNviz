@@ -4,6 +4,7 @@ import { BottomDock } from "../components/BottomDock/BottomDock";
 import { DisassemblyView } from "../components/DisassemblyView/DisassemblyView";
 import { RegisterPanel } from "../components/RegisterPanel/RegisterPanel";
 import { StackMemoryView } from "../components/StackMemoryView/StackMemoryView";
+import { StatusBar } from "../components/StatusBar/StatusBar";
 import { Toolbar } from "../components/Toolbar/Toolbar";
 import { useCapabilities } from "../hooks/useCapabilities";
 import { useSamples } from "../hooks/useSamples";
@@ -43,6 +44,7 @@ export function Workbench() {
   return (
     <div className="flex h-screen min-h-0 flex-col bg-[#080a0f] text-slate-300" data-testid="workbench">
       <Toolbar samples={samples} connection={connection} ready={data?.ready ?? false} />
+      <StatusBar />
 
       {error ? (
         <div className="flex shrink-0 items-center gap-3 border-b border-rose-500/30 bg-rose-500/10 px-4 py-1.5">

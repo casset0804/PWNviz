@@ -36,6 +36,34 @@ logger = get_logger("pwnviz.session")
 STOP_SYMBOL_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,127}$")
 SUBSCRIBER_QUEUE_MAX = 256
 
+
+def _parse_breakpoints(payload: dict) -> list[dict]:
+    """Normalize the small ``bkpt`` object from -break-insert for the UI."""
+    raw = payload.get("bkpt")
+    candidates = raw if isinstance(raw, list) else [raw]
+    result: list[dict] = []
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        number = item.get("number")
+        address = item.get("addr")
+        line = item.get("line")
+        try:
+            parsed_line = int(str(line)) if line is not None else None
+        except (TypeError, ValueError):
+            parsed_line = None
+        result.append(
+            {
+                "number": str(number) if number is not None else None,
+                "address": str(address) if address else None,
+                "function": item.get("func") or None,
+                "file": item.get("fullname") or item.get("file") or None,
+                "line": parsed_line,
+                "enabled": str(item.get("enabled", "y")).lower() == "y",
+            }
+        )
+    return result
+
 EXEC_COMMANDS = {
     "step_instruction": "-exec-step-instruction",
     "next_instruction": "-exec-next-instruction",
@@ -88,6 +116,8 @@ class DebugSession:
         self._pump_task: asyncio.Task[None] | None = None
         self._closed = False
         self._session_warnings: list[str] = []
+        self._breakpoints: list[dict] = []
+        self._output_seq = 0
 
     @staticmethod
     def new_id() -> str:
@@ -131,6 +161,8 @@ class DebugSession:
         events = [self._state_event()]
         if self._last_snapshot is not None:
             events.append(self._snapshot_event(self._last_snapshot))
+        if self._breakpoints:
+            events.append(self._breakpoints_event())
         if self.state is SessionState.TERMINATED:
             events.append(
                 {
@@ -158,6 +190,13 @@ class DebugSession:
             "type": "snapshot",
             "session_id": self.session_id,
             "payload": snapshot.model_dump(mode="json"),
+        }
+
+    def _breakpoints_event(self) -> dict:
+        return {
+            "type": "breakpoints.updated",
+            "session_id": self.session_id,
+            "payload": {"breakpoints": list(self._breakpoints)},
         }
 
     def _broadcast(self, event: dict) -> None:
@@ -225,10 +264,14 @@ class DebugSession:
                 )
                 if not STOP_SYMBOL_RE.match(self.stop_at):
                     raise DebuggerError("Invalid breakpoint symbol.")
-                await controller.execute(
+                breakpoint_record = await controller.execute(
                     f"-break-insert {self.stop_at}",
                     timeout=self.settings.gdb_command_timeout_seconds,
                 )
+                self._breakpoints = _parse_breakpoints(
+                    breakpoint_record.get("payload") or {}
+                )
+                self._broadcast(self._breakpoints_event())
                 await self._set_state(SessionState.READY)
                 self._pump_task = asyncio.create_task(
                     self._event_loop(), name=f"pwnviz-session-{self.session_id}"
@@ -451,6 +494,20 @@ class DebugSession:
                     await self._handle_stop(event["event"])
                 elif event_type == "exited":
                     await self._handle_exit(event)
+                elif event_type == "output":
+                    text = str(event.get("text") or "")[:1000]
+                    if text:
+                        self._output_seq += 1
+                        output_event = {
+                            "type": "debugger.output",
+                            "session_id": self.session_id,
+                            "payload": {
+                                "stream": event.get("stream") or "output",
+                                "text": text,
+                                "seq": self._output_seq,
+                            },
+                        }
+                        self._broadcast(output_event)
                 elif event_type == "error":
                     await self._handle_fatal_error(
                         str(event.get("message") or "MI reader failed")

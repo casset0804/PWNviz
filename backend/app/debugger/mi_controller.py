@@ -258,6 +258,13 @@ class MIController:
             detail = payload.get("msg") or payload.get("message") or "GDB error"
             self.last_command_error = str(detail)
             raise MICommandError(command, str(detail))
+        self._events.put_nowait(
+            {
+                "type": "output",
+                "stream": "mi",
+                "text": f"{command} → {message}",
+            }
+        )
         return record
 
     async def wait_for_stop(
@@ -352,7 +359,15 @@ class MIController:
         if record_type in {"console", "log", "output", "target"}:
             text = record.get("payload")
             if isinstance(text, str) and text:
-                self._recent_output.append(text.rstrip("\n"))
+                clean = text.rstrip("\n")
+                self._recent_output.append(clean)
+                self._events.put_nowait(
+                    {
+                        "type": "output",
+                        "stream": record_type,
+                        "text": clean,
+                    }
+                )
             return
 
         # Unknown record types are retained for diagnostics, never interpreted.

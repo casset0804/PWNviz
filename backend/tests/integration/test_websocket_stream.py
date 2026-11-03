@@ -52,7 +52,7 @@ def test_websocket_streams_state_and_snapshot() -> None:
             assert stepped.status_code == 200, stepped.text
 
             events: list[dict] = []
-            for _ in range(20):
+            for _ in range(100):
                 event = websocket.receive_json()
                 events.append(event)
                 if (
@@ -60,10 +60,21 @@ def test_websocket_streams_state_and_snapshot() -> None:
                     and event["payload"]["snapshot_id"] > first_snapshot_id
                 ):
                     break
+            # GDB output records can be emitted after the stop notification.
+            while not any(event["type"] == "debugger.output" for event in events):
+                events.append(websocket.receive_json())
             assert any(
                 event["type"] == "session.state"
                 and event["payload"]["state"] == "STOPPED"
                 for event in events
+            ), events
+            assert any(
+                event["type"] == "breakpoints.updated"
+                and event["payload"]["breakpoints"]
+                for event in events
+            ), events
+            assert any(
+                event["type"] == "debugger.output" for event in events
             ), events
             snapshots = [
                 event for event in events if event["type"] == "snapshot"

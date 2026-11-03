@@ -19,7 +19,7 @@ export function DebugLogPanel() {
           {log.length} entries
         </span>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-2">
+      <div className="min-h-0 flex-1 overflow-auto p-2" data-testid="debug-log-panel">
         {log.length === 0 ? (
           <p className="p-2 font-mono text-[10px] text-slate-600">
             No session events yet. Create a session to see debugger events here.
@@ -30,15 +30,22 @@ export function DebugLogPanel() {
               .slice()
               .reverse()
               .map((entry) => (
-                <li key={entry.id} className="flex gap-2 px-1 py-0.5">
+                <li
+                  key={entry.id}
+                  data-testid="debug-log-entry"
+                  data-level={entry.level}
+                  className="flex gap-2 px-1 py-0.5"
+                >
                   <span className="w-20 shrink-0 text-slate-700">{entry.at.slice(11, 19)}</span>
                   <span
-                    className={`w-10 shrink-0 ${
+                    className={`w-14 shrink-0 ${
                       entry.level === "error"
                         ? "text-rose-300"
                         : entry.level === "event"
                           ? "text-cyan-300"
-                          : "text-slate-600"
+                          : entry.level === "gdb"
+                            ? "text-emerald-300/80"
+                            : "text-slate-600"
                     }`}
                   >
                     {entry.level}

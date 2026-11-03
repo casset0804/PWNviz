@@ -1,7 +1,7 @@
 # 开发阶段与验收计划
 
-每一阶段结束时项目必须仍可启动。当前仓库状态：**Phase 0/1 已完成，Phase 2
-核心前端可视化已完成并通过真实 GDB UI E2E**；断点/源码/DWARF 留到 Phase 3/4。
+每一阶段结束时项目必须仍可启动。当前仓库状态：**Phase 0/1/2 已完成，Phase 3
+实时调试工作台已完成并通过完整真实 GDB UI E2E**；断点增删/源码/DWARF 留到后续。
 
 ## Phase 0：环境探测与骨架
 
@@ -108,14 +108,22 @@
 - [x] 第二轮 Review：取消清理、本地客户端中间件、WebSocket 队列上限、
       DELETE 失败时前端保留 session。
 
-## Phase 3：调试工作台联动（部分完成）
+## Phase 3：调试工作台联动（已完成核心）
 
 - [x] 寄存器面板真实值 + before/after；
-- [x] 反汇编面板高亮当前 RIP、点击选择；
-- [x] 工具栏动作真实可用（Run/Continue/Pause/StepI/NextI/Next/Finish/Terminate）；
-- [x] WebSocket 实时推送、断线重连；
-- [x] session 状态机与错误提示；
-- [ ] 断点增删、源码视图。
+- [x] 反汇编面板高亮当前 RIP、breakpoint marker、点击选择；
+- [x] Toolbar：Run/Continue/Pause/Step Instruction/Next Instruction/
+      Step Into/Step Over/Finish/Restart/Terminate；
+- [x] 状态栏：Initializing/Running/Stopped/Exited/Error；
+- [x] 统一 WebSocket 事件：session.state / snapshot / debugger.output /
+      debugger.error / breakpoints.updated / session.terminated；
+- [x] 断线重连、后端重启/未知 session、重复消息、stale snapshot 处理；
+- [x] Debug Log 展示真实 GDB/MI 输出；
+- [x] Explanation：push/pop/mov/sub rsp/add rsp/call/ret/leave/nop，
+      仅结合真实 before/after；未知指令不猜测；
+- [x] 完整 E2E：main → StepI → Step Into add_numbers → RSP 变化 →
+      Finish → Continue Exited → Restart，页面不刷新；
+- [ ] 断点增删 API、源码视图。
 
 ## Phase 4：教学语义增强
 

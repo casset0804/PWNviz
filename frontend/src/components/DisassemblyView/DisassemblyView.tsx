@@ -9,12 +9,18 @@ export function DisassemblyView() {
   const selectedInstructionAddress = useDebugStore(
     (state) => state.selectedInstructionAddress,
   );
+  const breakpoints = useDebugStore((state) => state.breakpoints);
   const selectInstruction = useDebugStore((state) => state.selectInstruction);
 
   const rip = normalizeAddress(snapshot?.registers.rip ?? null);
   const instruction = snapshot?.instruction ?? null;
   const selected = normalizeAddress(selectedInstructionAddress);
   const lines = snapshot?.disassembly ?? [];
+  const breakpointAddresses = new Set(
+    breakpoints
+      .map((breakpoint) => normalizeAddress(breakpoint.address))
+      .filter((address): address is string => address !== null),
+  );
 
   return (
     <Panel
@@ -64,6 +70,8 @@ export function DisassemblyView() {
                   Boolean(rip) && lineAddress !== null && compareAddress(lineAddress, rip) === 0;
                 const isSelected =
                   Boolean(selected) && lineAddress !== null && compareAddress(lineAddress, selected) === 0;
+                const hasBreakpoint =
+                  lineAddress !== null && breakpointAddresses.has(lineAddress);
                 return (
                   <button
                     type="button"
@@ -83,6 +91,9 @@ export function DisassemblyView() {
                   >
                     <span className={`w-[8.5rem] shrink-0 ${isCurrent ? "text-cyan-300" : "text-slate-600"}`}>
                       {line.address}
+                    </span>
+                    <span className="w-2 shrink-0 text-rose-400" title={hasBreakpoint ? "breakpoint" : undefined}>
+                      {hasBreakpoint ? "●" : ""}
                     </span>
                     <span className="min-w-0 flex-1 truncate" title={line.text}>
                       {line.text}

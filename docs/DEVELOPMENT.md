@@ -502,7 +502,7 @@ changed_bytes = [{address: 0x7fffffffe274, before: 00, after: 0a}]
 ### 15.4 测试结果
 
 ```text
-110 passed in 48.23s
+110 passed in 49.64s
 ```
 
 核心真实集成测试：
@@ -648,21 +648,22 @@ node scripts/ui_smoke.mjs
 
 ```text
 npm test
-✓ src/stores/debugStore.test.ts (2 tests)
-✓ src/lib/snapshot.test.ts (5 tests)
+✓ src/lib/explain.test.ts (10 tests)
 ✓ src/lib/address.test.ts (6 tests)
-Test Files 3 passed (3)
-Tests 13 passed (13)
+✓ src/lib/snapshot.test.ts (5 tests)
+✓ src/stores/debugStore.test.ts (2 tests)
+Test Files 4 passed (4)
+Tests 23 passed (23)
 
 tsc --noEmit && vite build
-✓ 38 modules transformed
-dist/assets/index-*.js 275.48 kB
+✓ 40 modules transformed
+dist/assets/index-*.js 287.23 kB
 ```
 
 测试覆盖：64-bit BigInt 精确性、地址格式化/比较/行内 offset、RSP/RBP marker、
-outside-window、changed-byte map、unreadable null、previous register 值，以及
-DELETE 失败时保留 session 供重试。测试 fixture 仅在 `*.test.ts` 中明确标记为测试
-数据，不进入运行时。
+outside-window、changed-byte map、unreadable null、previous register 值、
+DELETE 失败保留 session、push/pop/mov/sub rsp/add rsp/call/ret/leave/nop 解释规则。
+测试 fixture 仅在 `*.test.ts` 中明确标记为测试数据，不进入运行时。
 
 未发现需要修改寄存器/内存/反汇编采集器的 bug；本轮修改的是 GDB 生命周期、
 取消清理、客户端边界与 WebSocket 背压。
@@ -707,6 +708,82 @@ DELETE 失败时保留 session 供重试。测试 fixture 仅在 `*.test.ts` 中
 ### 17.3 验证
 
 - 后端：`110 passed, 1 warning`（真实 GDB 集成测试未删除、未 mock 成功路径）；
-- 前端：`13 passed`，`tsc --noEmit && vite build` 成功；
+- 前端：`23 passed`，`tsc --noEmit && vite build` 成功；
 - 真实 UI E2E 仍通过 Run → StepI → changed cell → RSP scroll → Terminate
   （见 16.2；本轮后端中间件未改变 loopback 访问路径）。
+
+## 18. Phase 3：WS 联动、Debug Log 与教学解释（2026-11-03）
+
+### 18.1 后端协议
+
+- `debugger.output`：`stream`（`mi`/`console`/`log`/`output`/`target`）、
+  `text`、单调 `seq`；`mi` 条目为实际 MI 命令 → 结果，其余为 GDB 原始
+  console/target 输出；
+- `breakpoints.updated`：启动时把 `-break-insert` 返回的断点规范化推送；
+- `session.state`、`snapshot`、`debugger.error`、`session.terminated` 保持；
+- 初始事件顺序保持 state → snapshot → breakpoints，兼容既有 WS 测试；
+- 订阅队列 256，满时丢最旧；输出事件不参与核心快照解析。
+
+### 18.2 前端
+
+- Toolbar：Run/Continue/Pause/StepI/NextI/Step Into/Step Over/Finish/Restart/
+  Terminate；
+- 状态栏：Idle/Initializing/Running/Stopped/Exited/Error，显示 action、stop、
+  RIP、snapshot、breakpoint、stream、PID；
+- Debug Log：真实 GDB/MI 输出；`seq` 去重；ANSI 清理；最多 200 条；
+- Explanation：push/pop/mov/sub rsp/add rsp/call/ret/leave/nop 规则；
+  before/after 差异 + 实测事实；不猜测未知指令；明确不把 RBP 当固定栈底；
+- stale snapshot：`snapshot_id` 单调；终态（EXITED/ERROR/TERMINATED）不被
+  晚到的 RUNNING/STOPPED 覆盖；WS 关闭码 4404 显示 session 不存在并停止重连；
+- Restart：先确认 DELETE 成功/404，再创建新 session 并重新 launch，页面不刷新。
+
+### 18.3 完整 UI E2E（真实 GDB）
+
+使用隔离 backend `:8001` + Vite `:5174`（backend 额外允许 5174 Origin）+ Edge CDP，
+避免中断当前 `:8000` 的已有 session。脚本 `scripts/ui_smoke.mjs`：
+
+```json
+{
+  "ok": true,
+  "before": {
+    "snapshot": "snapshot #1",
+    "rip": "0x0000000000401160",
+    "rsp": "0x00007fffffffe210",
+    "rbp": "0x00007fffffffe220",
+    "rows": 64,
+    "markers": 2
+  },
+  "after": {
+    "snapshot": "snapshot #2",
+    "rip": "0x0000000000401167",
+    "changedCells": 1
+  },
+  "breakpoints": "bp 1 @ 0x0000000000401160",
+  "debugLogHasGdb": true,
+  "fullFlow": {
+    "callAddress": "0x0000000000401178",
+    "rspAtCall": "0x00007fffffffe210",
+    "rspInside": "0x00007fffffffe200",
+    "rspAfterFinish": "0x00007fffffffe210",
+    "ripInside": "0x0000000000401144",
+    "exited": "Exited",
+    "restarted": true
+  },
+  "terminated": true
+}
+```
+
+验证链路：真实点击 Run → StepI 到 call → Step Into 进入 `add_numbers` →
+真实 RSP 从 `...e210` 降到 `...e200` → Finish 后回到 `...e210` →
+Continue 到 `Exited` → Restart 回到 main，页面不刷新；Breakpoint marker、
+Debug Log 的 GDB/MI 输出、Explanation 面板同时验证。
+
+截图：[assets/workbench-phase2.png](assets/workbench-phase2.png)。
+
+### 18.4 测试
+
+- 后端：`110 passed, 1 warning`（真实 GDB 集成测试保留；WS 测试新增
+  `breakpoints.updated` 与 `debugger.output` 断言）；
+- 前端：`23 passed`；`tsc --noEmit && vite build` 成功；
+- 说明：Step Into 一次可能执行多条机器指令，因此 Explanation 在无法把
+  before/after 归因于单条指令时只显示“已执行，请观察状态变化”，不猜测。

@@ -2,9 +2,10 @@
 /**
  * End-to-end UI smoke test against a real PWNviz backend + Vite dev server.
  *
- * It drives a headless Chromium/Edge over CDP, clicks Run and StepI, verifies
- * that the stack canvas/register panel changed from a real snapshot, clicks a
- * changed byte cell, and writes a screenshot.
+ * It drives a headless Chromium/Edge over CDP through the full teaching flow:
+ * Run, StepI, Step Into add_numbers, observe RSP, Finish, Continue to exit,
+ * Restart; it also verifies WebSocket status/breakpoints/GDB log events and
+ * byte-cell selection, then writes a screenshot.
  *
  * Usage:
  *   node scripts/ui_smoke.mjs
@@ -157,7 +158,44 @@ async function main() {
     );
 
     sessionId = await client.evaluate(`new URLSearchParams(location.search).get('sessionId')`);
-    const before = await client.evaluate(`({
+    await waitFor(
+      client,
+      "WebSocket live",
+      `(document.querySelector('[data-testid="stream-status"]')?.textContent ?? '').includes('open')`,
+      30_000,
+    );
+    await waitFor(
+      client,
+      "breakpoint event",
+      `!(document.querySelector('[data-testid="breakpoint-count"]')?.textContent ?? '').startsWith('0 ')`,
+      30_000,
+    );
+    await waitFor(
+      client,
+      "status bar stopped",
+      `(document.querySelector('[data-testid="status-state"]')?.textContent ?? '').trim() === 'Stopped'`,
+      10_000,
+    );
+    const breakpointText = await client.evaluate(
+      `document.querySelector('[data-testid="breakpoint-count"]')?.textContent ?? ''`,
+    );
+    const restartDisabled = await client.evaluate(
+      `document.querySelector('[data-testid="restart"]')?.disabled ?? null`,
+    );
+
+    // Debug Log must contain live GDB/MI output events, not just local UI actions.
+    await client.evaluate(`document.querySelector('[data-testid="tab-log"]').click()`);
+    await waitFor(
+      client,
+      "debugger.output log line",
+      `document.querySelectorAll('[data-testid="debug-log-entry"][data-level="gdb"]').length > 0`,
+      20_000,
+    );
+    const debugLogText = await client.evaluate(
+      `document.querySelector('[data-testid="debug-log-panel"]')?.textContent ?? ''`,
+    );
+    await client.evaluate(`document.querySelector('[data-testid="tab-memory"]').click()`);
+    let before = await client.evaluate(`({
       snapshot: document.querySelector('[data-testid="snapshot-id"]')?.textContent ?? '',
       rip: document.querySelector('[data-testid="register-rip"]')?.getAttribute('data-value') ?? '',
       rsp: document.querySelector('[data-testid="register-rsp"]')?.getAttribute('data-value') ?? '',
@@ -263,7 +301,153 @@ async function main() {
     });
     writeFileSync(SHOT_PATH, Buffer.from(screenshot.data, "base64"));
 
-    // Terminate through the UI and verify the backend session is gone.
+    // Full acceptance flow: main → call → step into add_numbers → finish →
+    // continue to exit → restart, all on the same page.
+    const callAddress = await client.evaluate(`(() => {
+      const line = Array.from(document.querySelectorAll('[data-testid="disassembly-line"]'))
+        .find((node) => node.textContent.includes('call') && node.textContent.includes('add_numbers'));
+      return line?.querySelector('span')?.textContent ?? '';
+    })()`);
+    assert(callAddress.startsWith("0x"), `call address not found: ${callAddress}`);
+
+    let rip = after.rip;
+    for (let index = 0; index < 30 && rip !== callAddress; index += 1) {
+      await waitFor(
+        client,
+        "StepI enabled during approach",
+        `(() => !document.querySelector('[data-testid="step-instruction"]')?.disabled)()`,
+        15_000,
+      );
+      const previousRip = rip;
+      await client.evaluate(`document.querySelector('[data-testid="step-instruction"]').click()`);
+      rip = await waitFor(
+        client,
+        "StepI RIP change",
+        `(() => {
+          const value = document.querySelector('[data-testid="register-rip"]')?.getAttribute('data-value') ?? '';
+          return value !== ${JSON.stringify(previousRip)} ? value : '';
+        })()`,
+        20_000,
+      );
+    }
+    assert(rip === callAddress, `did not reach call address ${callAddress}; rip=${rip}`);
+    const rspAtCall = await client.evaluate(
+      `document.querySelector('[data-testid="register-rsp"]')?.getAttribute('data-value') ?? ''`,
+    );
+
+    await waitFor(
+      client,
+      "Step Into enabled",
+      `(() => !document.querySelector('[data-testid="step-into"]')?.disabled)()`,
+      15_000,
+    );
+    await client.evaluate(`document.querySelector('[data-testid="step-into"]').click()`);
+    const ripInside = await waitFor(      client,
+      "entered add_numbers",
+      `(() => {
+        const value = document.querySelector('[data-testid="register-rip"]')?.getAttribute('data-value') ?? '';
+        const status = document.querySelector('[data-testid="status-state"]')?.textContent ?? '';
+        return value !== ${JSON.stringify(callAddress)} && status.includes('Stopped') ? value : '';
+      })()`,
+      30_000,
+    );
+    const rspInside = await client.evaluate(
+      `document.querySelector('[data-testid="register-rsp"]')?.getAttribute('data-value') ?? ''`,
+    );
+    assert(BigInt(rspInside) < BigInt(rspAtCall), `RSP did not decrease entering function: ${rspAtCall} -> ${rspInside}`);
+
+    await client.evaluate(`document.querySelector('[data-testid="tab-explanation"]').click()`);
+    const explanationText = await waitFor(
+      client,
+      "instruction explanation",
+      `(() => {
+        const text = document.querySelector('[data-testid="workbench"]')?.textContent ?? '';
+        return text.includes('last executed instruction') &&
+          (text.includes('measured differences only') || text.includes('rule:'))
+          ? text
+          : '';
+      })()`,
+      20_000,
+    );
+    assert(
+      explanationText.includes("measured differences only") || explanationText.includes("rule:"),
+      "explanation panel missing measured/rule state",
+    );
+    await client.evaluate(`document.querySelector('[data-testid="tab-memory"]').click()`);
+
+    await waitFor(
+      client,
+      "Finish enabled",
+      `(() => !document.querySelector('[data-testid="finish"]')?.disabled)()`,
+      15_000,
+    );
+    await client.evaluate(`document.querySelector('[data-testid="finish"]').click()`);
+    await waitFor(
+      client,
+      "returned from add_numbers",
+      `(() => {
+        const value = document.querySelector('[data-testid="register-rip"]')?.getAttribute('data-value') ?? '';
+        const status = document.querySelector('[data-testid="status-state"]')?.textContent ?? '';
+        return value !== ${JSON.stringify(ripInside)} && status.includes('Stopped');
+      })()`,
+      30_000,
+    );
+    const rspAfterFinish = await client.evaluate(
+      `document.querySelector('[data-testid="register-rsp"]')?.getAttribute('data-value') ?? ''`,
+    );
+    assert(BigInt(rspAfterFinish) > BigInt(rspInside), "RSP did not unwind after finish");
+
+    await waitFor(
+      client,
+      "Continue enabled",
+      `(() => !document.querySelector('[data-testid="continue"]')?.disabled)()`,
+      15_000,
+    );
+    await client.evaluate(`document.querySelector('[data-testid="continue"]').click()`);
+    await waitFor(
+      client,
+      "target exited",
+      `(document.querySelector('[data-testid="status-state"]')?.textContent ?? '').includes('Exited')`,
+      30_000,
+    );
+    const exited = await client.evaluate(
+      `(document.querySelector('[data-testid="status-state"]')?.textContent ?? '').trim()`,
+    );
+    assert(exited === "Exited", `unexpected terminal status: ${exited}`);
+
+    const oldSessionId = sessionId;
+    await waitFor(
+      client,
+      "Restart enabled",
+      `(() => !document.querySelector('[data-testid="restart"]')?.disabled)()`,
+      15_000,
+    );
+    await client.evaluate(`document.querySelector('[data-testid="restart"]').click()`);
+    await waitFor(
+      client,
+      "restart stopped at main",
+      `(() => {
+        const status = document.querySelector('[data-testid="status-state"]')?.textContent ?? '';
+        const rip = document.querySelector('[data-testid="register-rip"]')?.getAttribute('data-value') ?? '';
+        const snap = document.querySelector('[data-testid="snapshot-id"]')?.textContent ?? '';
+        return status.includes('Stopped') && rip === ${JSON.stringify(before.rip)} && snap.includes('#1');
+      })()`,
+      60_000,
+    );
+    const newSessionId = await client.evaluate(
+      `new URLSearchParams(location.search).get('sessionId')`,
+    );
+    assert(newSessionId && newSessionId !== oldSessionId, "restart did not create a new session");
+    sessionId = newSessionId;
+    const restarted = true;
+
+    // Terminate the restarted session through the UI.
+    await waitFor(
+      client,
+      "Terminate enabled after restart",
+      `(() => !document.querySelector('[data-testid="terminate"]')?.disabled)()`,
+      15_000,
+    );
     await client.evaluate(`document.querySelector('[data-testid="terminate"]').click()`);
     await waitFor(
       client,
@@ -281,9 +465,22 @@ async function main() {
           sessionId,
           before,
           after: { ...after, changedLabels: after.changedLabels.length },
+          breakpoints: breakpointText,
+          debugLogHasGdb: debugLogText.includes("gdb"),
+          restartDisabled,
           rspVisible,
           inspector,
           selection: selectionText.includes("selected instruction"),
+          fullFlow: {
+            callAddress,
+            rspAtCall,
+            rspInside,
+            rspAfterFinish,
+            ripInside,
+            exited,
+            restarted,
+            newSessionId,
+          },
           terminated: true,
           screenshot: SHOT_PATH,
         },
