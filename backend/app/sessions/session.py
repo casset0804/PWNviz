@@ -174,6 +174,19 @@ class DebugSession:
         async with self._snapshot_condition:
             self._snapshot_condition.notify_all()
 
+    async def _close_controller(self) -> None:
+        controller = self.controller
+        self.controller = None
+        if controller is not None:
+            try:
+                await controller.close()
+            except Exception:
+                logger.warning(
+                    "failed to close GDB controller for %s",
+                    self.session_id,
+                    exc_info=True,
+                )
+
     # ------------------------------------------------------------------ lifecycle
     async def launch(self) -> Snapshot | None:
         async with self._lock:
@@ -274,9 +287,7 @@ class DebugSession:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._pump_task
             self._pump_task = None
-        if self.controller is not None:
-            with contextlib.suppress(Exception):
-                await self.controller.close()
+        await self._close_controller()
         await self._set_state(SessionState.ERROR)
         self._broadcast(
             {
@@ -413,17 +424,42 @@ class DebugSession:
                     await self._handle_stop(event["event"])
                 elif event_type == "exited":
                     await self._handle_exit(event)
+                elif event_type == "error":
+                    await self._handle_fatal_error(
+                        str(event.get("message") or "MI reader failed")
+                    )
+                    break
                 elif event_type == "closed":
                     break
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.exception("session event loop failed")
-            async with self._lock:
-                if not self._closed:
-                    self.last_error = f"Event loop failed: {type(exc).__name__}: {exc}"
-                    await self._set_state(SessionState.ERROR)
-                    await self._notify_snapshot()
+            await self._handle_fatal_error(
+                f"Event loop failed: {type(exc).__name__}: {exc}"
+            )
+
+    async def _handle_fatal_error(self, message: str) -> None:
+        """Reader/event-loop failure: mark ERROR and release the GDB process."""
+        async with self._lock:
+            if self.state in {
+                SessionState.TERMINATED,
+                SessionState.ERROR,
+                SessionState.EXITED,
+            }:
+                return
+            self.last_error = message
+            self._closed = True
+            await self._set_state(SessionState.ERROR)
+            self._broadcast(
+                {
+                    "type": "debugger.error",
+                    "session_id": self.session_id,
+                    "payload": {"message": message},
+                }
+            )
+        await self._close_controller()
+        await self._notify_snapshot()
 
     async def _handle_stop(self, stop_event) -> None:
         async with self._lock:
@@ -437,8 +473,12 @@ class DebugSession:
             self.stop_reason = reason or None
             if reason.startswith("exited"):
                 # There is no register/memory state worth collecting after exit.
+                # Release GDB immediately so an abandoned session cannot retain
+                # a debugger process forever.
                 await self._set_state(SessionState.EXITED)
+                self._closed = True
                 await self._notify_snapshot()
+                await self._close_controller()
                 return
             await self._set_state(SessionState.STOPPED)
             if self.controller is None or self.collector is None:
@@ -486,7 +526,9 @@ class DebugSession:
             self.stop_reason = str(event.get("reason") or "exited")
             self.last_error = None
             await self._set_state(SessionState.EXITED)
+            self._closed = True
             await self._notify_snapshot()
+        await self._close_controller()
 
     async def _wait_for_snapshot(
         self, seq_before: int, timeout: float
@@ -553,11 +595,7 @@ class DebugSession:
                 with contextlib.suppress(asyncio.CancelledError):
                     await self._pump_task
                 self._pump_task = None
-            controller = self.controller
-            self.controller = None
-            if controller is not None:
-                with contextlib.suppress(Exception):
-                    await controller.close()
+            await self._close_controller()
             self._broadcast(
                 {
                     "type": "session.terminated",

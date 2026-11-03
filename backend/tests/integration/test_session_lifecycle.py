@@ -237,7 +237,19 @@ async def test_continue_to_exit_and_cleanup(client: AsyncClient) -> None:
     assert state == "EXITED", f"session never exited: {state}"
 
     gdb_pid = info["gdb_pid"]
-    await client.delete(f"/api/v1/sessions/{session_id}")
+    # Target exit must release GDB immediately, not only on DELETE.
+    deadline = time.monotonic() + 5
+    released = False
+    while time.monotonic() < deadline:
+        current = (await client.get(f"/api/v1/sessions/{session_id}")).json()
+        if current["gdb_pid"] is None and not _pid_alive(gdb_pid):
+            released = True
+            break
+        await asyncio.sleep(0.05)
+    assert released, "GDB was not released after the inferior exited"
+
+    deleted = await client.delete(f"/api/v1/sessions/{session_id}")
+    assert deleted.status_code == 204
     assert await _wait_pid_gone(gdb_pid)
 
 

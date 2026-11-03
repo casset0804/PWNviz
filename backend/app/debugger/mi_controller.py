@@ -11,8 +11,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import itertools
+import os
+import signal
 from collections import deque
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from app.core.config import Settings
@@ -82,6 +85,7 @@ class MIController:
         self._state_condition = asyncio.Condition()
         self._events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._closed = False
+        self._fatal_error: str | None = None
         self._state = "unknown"
         self._stop_epoch = 0
         self._exit_epoch = 0
@@ -91,6 +95,7 @@ class MIController:
         self._recent_output: deque[str] = deque(maxlen=400)
         self.warnings: list[str] = []
         self.last_command_error: str | None = None
+        self._inferior_starttime: str | None = None
 
     # ------------------------------------------------------------------ lifecycle
     @property
@@ -157,8 +162,41 @@ class MIController:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._reader_task
             self._reader_task = None
+        self._kill_orphan_inferior()
         await self._notify_state()
         self._events.put_nowait({"type": "closed"})
+
+    @staticmethod
+    def _proc_starttime(pid: int) -> str | None:
+        """Read field 22 (starttime) from /proc/<pid>/stat, if available."""
+        try:
+            raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+        except OSError:
+            return None
+        try:
+            fields = raw.rsplit(")", 1)[1].split()
+            return fields[19]
+        except (IndexError, AttributeError):
+            return None
+
+    def _kill_orphan_inferior(self) -> None:
+        """Kill an inferior that survived a GDB crash, without PID-reuse risk.
+
+        The inferior PID is only killed when its /proc starttime still matches
+        the value observed at thread-group-started.
+        """
+        pid = self.inferior_pid
+        expected = self._inferior_starttime
+        if not pid or expected is None:
+            return
+        current = self._proc_starttime(pid)
+        if current is None or current != expected:
+            return
+        try:
+            os.kill(pid, signal.SIGKILL)
+            logger.warning("killed orphan inferior pid=%s after GDB exit", pid)
+        except (ProcessLookupError, PermissionError):
+            pass
 
     # ------------------------------------------------------------------ commands
     def _command_timeout(self) -> float:
@@ -174,6 +212,8 @@ class MIController:
         """Send one MI command and wait for its token-tagged result record."""
         if self._closed and not allow_closed:
             raise MIClosed("GDB controller is closed")
+        if self._fatal_error is not None:
+            raise MIError(self._fatal_error)
         token = next(self._tokens)
         future: asyncio.Future[dict[str, Any]] = (
             asyncio.get_running_loop().create_future()
@@ -214,6 +254,8 @@ class MIController:
                     return self._last_stop
                 if self._exit_epoch > epochs.exit:
                     raise TargetExited(self._exit_code)
+                if self._fatal_error is not None:
+                    raise MIError(self._fatal_error)
                 if self._closed:
                     raise MIClosed("GDB controller closed while waiting for a stop")
                 remaining = deadline - asyncio.get_running_loop().time()
@@ -234,12 +276,14 @@ class MIController:
             except GdbProcessError as exc:
                 if not self._closed:
                     logger.warning("GDB reader stopped: %s", exc)
+                    await self._reader_failed(str(exc))
                 return
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # closed pipes, parser edge cases
                 if not self._closed:
                     logger.warning("GDB reader failed: %s", exc)
+                    await self._reader_failed(str(exc))
                 return
             for record in records:
                 await self._handle_record(record)
@@ -247,6 +291,17 @@ class MIController:
                 # Let the session see a terminal state even if GDB died abruptly.
                 await self._handle_abnormal_exit()
                 return
+
+    async def _reader_failed(self, message: str) -> None:
+        """Wake waiters and surface a permanent reader failure to the session."""
+        if self._fatal_error is not None:
+            return
+        self._fatal_error = f"MI reader failed: {message}"
+        self._state = "error"
+        await self._notify_state()
+        self._events.put_nowait(
+            {"type": "error", "message": self._fatal_error}
+        )
 
     async def _handle_abnormal_exit(self) -> None:
         if self._state == "exited":
@@ -315,6 +370,11 @@ class MIController:
                 self.inferior_pid = int(str(pid)) if pid is not None else None
             except ValueError:
                 self.inferior_pid = None
+            self._inferior_starttime = (
+                self._proc_starttime(self.inferior_pid)
+                if self.inferior_pid is not None
+                else None
+            )
             return
 
         if message == "thread-group-exited":

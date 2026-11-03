@@ -254,6 +254,8 @@ CREATED ──launch──> INITIALIZING ──load/break/run──> RUNNING
   独立排队；命令超时不会关闭 reader；
 - 只有收到 `*stopped` 后才采集快照；进程 running 时拒绝读取快照；
 - 目标退出/失败时 GDB 仍由 `DELETE` 或后端 shutdown 回收。
+- 目标（inferior）退出后控制器会**自动关闭 GDB**：`gdb_pid` 变为 `null`，
+  会话与快照历史仍保留，DELETE 仍可安全调用。
 
 ## POST `/api/v1/sessions`
 
@@ -478,6 +480,7 @@ GDB 对不可读区域返回 `^error`（例如跨未映射页）。采集器按 
 ## 错误与恢复
 
 - GDB 命令超时：`504 debugger_timeout`，会话进入 `ERROR`，控制器/进程被清理；
+- MI reader 永久失败：`session.state=ERROR`，控制器关闭，GDB/inferior 被回收；
 - GDB 返回 `^error`（如 `finish` 位于最外层）：`502 debugger_error`，
   目标仍 stopped 时 session 保持 `STOPPED`，可继续操作；
 - 快照采集部分失败：session 仍 `STOPPED`，快照带 `warnings`/不可读区间；

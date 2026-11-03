@@ -49,6 +49,10 @@ PWNviz 第一版是**本机单用户教学工具**：
 - 进程级限制 `PWNVIZ_SESSION_MAX_ACTIVE`（默认 8），防止无限 GDB 进程；
 - 终止会话：`-gdb-exit` → 等待退出 → 进程组 kill 兜底；集成测试通过 `/proc`
   确认 GDB 与 inferior 均消失；
+- inferior 退出后自动关闭 GDB；MI reader 永久失败或事件循环异常时进入 ERROR
+  并关闭控制器；
+- GDB 异常退出时，仅在其 `/proc/<pid>/stat` 启动时间仍匹配时 kill 可能残留的
+  inferior，避免 PID 复用误杀；
 - 快照中的地址/寄存器/qword 全部是十六进制字符串，不可读字节为 `null`；
 - 变量名、返回地址等语义标注未在 Phase 1 生成，不会把未知 qword 冒充语义。
 

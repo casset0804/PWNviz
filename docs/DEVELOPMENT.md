@@ -502,7 +502,7 @@ changed_bytes = [{address: 0x7fffffffe274, before: 00, after: 0a}]
 ### 15.4 测试结果
 
 ```text
-99 passed in 48.82s
+102 passed in 53.18s
 ```
 
 核心真实集成测试：
@@ -530,6 +530,8 @@ tests/integration/test_mi_controller.py
 
 tests/unit/test_memory_unreadable.py
 tests/unit/test_diff.py
+tests/unit/test_mi_reader_failure.py
+tests/unit/test_session_failure.py
 ```
 
 验证点：
@@ -539,6 +541,8 @@ tests/unit/test_diff.py
 - 首次 diff 为空，第二次 diff 的 `previous_snapshot_id` 正确；
 - finish 从 `add_numbers` 返回 `main`，frames 以 GDB unwinder 为准；
 - DELETE 后 GDB 与 inferior PID 均从 `/proc` 消失；
+- inferior 退出后 GDB 自动释放（不必等 DELETE）；
+- reader 永久失败时 session 进入 ERROR 并关闭 GDB；
 - 真实 `-exec-interrupt` 能在 `sleep(30)` 的 inferior 上停止；
 - 故意让一条命令超时后，reader 仍能执行后续命令并正常关闭；
 - WebSocket 连接先收到 state + snapshot，StepI 后收到 RUNNING/STOPPED/snapshot；
@@ -566,3 +570,16 @@ tests/unit/test_diff.py
 - 无 session 空闲 TTL；目前依赖 DELETE 或后端 shutdown 清理；
 - 无断点增删、源码视图、DWARF 变量（Phase 3/4）；
 - 长时间运行的非交互目标依赖 interrupt；已用真实 sleep 程序验证一次。
+
+### 15.7 安全/可靠性 Review 后的修复
+
+- MI reader 永久失败：写 `session.state=ERROR`、关闭控制器并回收 GDB/inferior，
+  不再让动作永久等待；
+- session 事件循环异常：同样进入 ERROR 并关闭控制器，避免“只置 ERROR、进程还在”；
+- inferior 退出：自动关闭 GDB（`gdb_pid` 变 `null`），不再要求客户端必须 DELETE；
+- GDB 异常退出：按 `/proc/<pid>/stat` starttime 校验后 kill 可能残留的 inferior，
+  避免 PID 复用误杀；
+- 新增失败路径测试：
+  `tests/unit/test_mi_reader_failure.py`、`tests/unit/test_session_failure.py`，
+  以及 `test_continue_to_exit_and_cleanup` 中“退出后自动释放 GDB”断言。
+- 真实 GDB 集成测试未删除、未改为 mock；最终 102 passed。

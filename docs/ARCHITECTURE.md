@@ -146,7 +146,9 @@ app/api/websocket.py         /api/v1/sessions/{id}/stream
 - `stop_epoch` / `exit_epoch` 让动作可以捕获“命令发出前”的基线，等待新事件；
 - 会话动作与快照采集共享同一把 session 锁，MI 写另有短锁，二者保证串行；
 - `-exec-continue`/`-exec-interrupt` 返回后由事件循环异步完成 stop+snapshot；
-- 步骤类动作在 HTTP 响应前等待对应 stop 与快照，避免前端拿到旧状态。
+- 步骤类动作在 HTTP 响应前等待对应 stop 与快照，避免前端拿到旧状态；
+- inferior 退出后自动关闭 GDB；reader 永久失败会置 ERROR 并关闭控制器；
+  异常退出时按 `/proc` starttime 校验后清理可能残留的 inferior。
 
 ### 3.2 实测：`*stopped` 可能与命令响应同批到达
 
