@@ -27,7 +27,9 @@ PWNviz 第一版是**本机单用户教学工具**：
   不提供上传、任意路径加载或任意 GDB 命令；Phase 1 仍只在本机可信样例范围内；
 - **错误结构化**：探测/调试失败返回可读 warning 或稳定 error code，不泄露堆栈给浏览器；
 - **仅本机绑定**：`python -m app` 在 `API_HOST` 非 loopback 时默认拒绝启动（退出码
-  2），必须显式设置 `PWNVIZ_ALLOW_REMOTE=1`；lifespan 对 CLI 启动方式给出 warning；
+  2），必须显式设置 `PWNVIZ_ALLOW_REMOTE=1`；`LocalOnlyMiddleware` 还会在 HTTP/
+  WebSocket 层默认拒绝非 loopback 客户端，覆盖直接 `uvicorn --host 0.0.0.0` 的
+  启动方式（TestClient 除外）；
 - **Host 白名单**：`TrustedHostMiddleware` 拒绝非预期 `Host` 头（默认
   `127.0.0.1`、`localhost`、`testserver`，可用 `PWNVIZ_ALLOWED_HOSTS` 扩展），
   缓解 DNS rebinding；
@@ -44,11 +46,16 @@ PWNviz 第一版是**本机单用户教学工具**：
 - `stop_at` 仅允许符号名 `^[A-Za-z_][A-Za-z0-9_.]{0,127}$`，文件路径来自样例注册表；
 - `session_id` 使用 `secrets.token_urlsafe(18)`，不可预测；
 - WebSocket 只允许已存在 session，并校验浏览器 `Origin`；未知 session 以 4404、
-  非法 Origin 以 4403 关闭；不同 session 不共享订阅队列；
+  非法 Origin 以 4403 关闭；不同 session 不共享订阅队列；默认还要求客户端为
+  loopback；
+- 每会话订阅队列有界（256），慢客户端只保留最新事件，避免无界内存增长；
 - 每会话命令超时（默认 10s）、等待 stopped 超时（默认 15s）、最多 200 张快照；
 - 进程级限制 `PWNVIZ_SESSION_MAX_ACTIVE`（默认 8），防止无限 GDB 进程；
 - 终止会话：`-gdb-exit` → 等待退出 → 进程组 kill 兜底；集成测试通过 `/proc`
   确认 GDB 与 inferior 均消失；
+- 任务取消安全：launch 取消会关闭已启动的 controller；controller.close 的最终
+  kill/close 在同步 finally 中执行；DELETE 请求取消后清理 task 继续；
+- 一次性 capability 探测在请求取消时会 killpg 回收探测子进程；
 - inferior 退出后自动关闭 GDB；MI reader 永久失败或事件循环异常时进入 ERROR
   并关闭控制器；
 - GDB 异常退出时，仅在其 `/proc/<pid>/stat` 启动时间仍匹配时 kill 可能残留的
@@ -62,6 +69,8 @@ PWNviz 第一版是**本机单用户教学工具**：
   任何能读取 session ID 的本机进程都可控制该会话；
 - 没有 session 空闲 TTL；异常退出（如后端 `SIGKILL`）时 GDB 子进程可能残留，
   依赖下次启动/人工清理；容器化与 PDEATHSIG 属于后续加固；
+- WebSocket 没有应用层 heartbeat；队列有界，但长期僵死的连接仍可能占用一个
+  subscriber，直到 TCP/ASGI 层发现断开；
 - GDB 路径、启动参数、pwndbg 路径来自本地配置（不是 HTTP 输入），应视为管理员
   可信配置；
 - 被调试 ELF 仍是受信任教学程序，不提供沙箱隔离；

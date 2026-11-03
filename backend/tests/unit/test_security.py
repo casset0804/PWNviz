@@ -16,6 +16,7 @@ from app.core.security import bind_guard_error, is_loopback_host
         ("localhost", True),
         ("::1", True),
         ("[::1]", True),
+        ("::ffff:127.0.0.1", True),
         ("0.0.0.0", False),
         ("::", False),
         ("192.168.1.10", False),

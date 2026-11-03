@@ -10,6 +10,9 @@ from __future__ import annotations
 import ipaddress
 from typing import TYPE_CHECKING
 
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
+
 if TYPE_CHECKING:  # pragma: no cover - import cycle preservation
     from app.core.config import Settings
 
@@ -34,9 +37,12 @@ def is_loopback_host(host: str) -> bool:
     if value == "localhost":
         return True
     try:
-        return ipaddress.ip_address(value).is_loopback
+        address = ipaddress.ip_address(value)
     except ValueError:
         return False
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        return address.ipv4_mapped.is_loopback
+    return address.is_loopback
 
 
 def bind_guard_error(settings: "Settings") -> str | None:
@@ -49,3 +55,64 @@ def bind_guard_error(settings: "Settings") -> str | None:
         "PWNVIZ_ALLOW_REMOTE=1 deliberately (and configure "
         "PWNVIZ_ALLOWED_HOSTS) if you understand the exposure."
     )
+
+
+class LocalOnlyMiddleware:
+    """Reject non-loopback clients even when uvicorn is launched directly.
+
+    ``bind_guard_error`` only runs through ``python -m app``. A user can still
+    invoke ``uvicorn app.main:app --host 0.0.0.0`` (or a process manager can),
+    bypassing that guard. This ASGI middleware closes the lower-level hole for
+    both HTTP and WebSocket clients unless remote access was explicitly enabled.
+    TestClient/ASGI harnesses use the conventional ``testclient`` peer and remain
+    allowed; an unknown peer is treated as non-local (fail closed).
+    """
+
+    def __init__(self, app: ASGIApp, *, allow_remote: bool) -> None:
+        self.app = app
+        self.allow_remote = allow_remote
+
+    async def __call__(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> None:
+        if (
+            not self.allow_remote
+            and scope.get("type") in {"http", "websocket"}
+        ):
+            raw_client = scope.get("client")
+            client = raw_client[0] if raw_client else None
+            if client != "testclient" and (
+                client is None or not is_loopback_host(client)
+            ):
+                if scope["type"] == "websocket":
+                    await send(
+                        {
+                            "type": "websocket.accept",
+                        }
+                    )
+                    await send(
+                        {
+                            "type": "websocket.close",
+                            "code": 4403,
+                            "reason": "local-only server",
+                        }
+                    )
+                else:
+                    response = JSONResponse(
+                        status_code=403,
+                        content={
+                            "error": {
+                                "code": "non_local_client",
+                                "message": (
+                                    "PWNviz is local-only; non-loopback clients "
+                                    "are not allowed unless PWNVIZ_ALLOW_REMOTE=1."
+                                ),
+                            }
+                        },
+                    )
+                    await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+__all__ = ["is_loopback_host", "bind_guard_error", "LocalOnlyMiddleware"]

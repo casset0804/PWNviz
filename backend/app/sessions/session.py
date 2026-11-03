@@ -34,6 +34,7 @@ from app.sessions.state import SessionState
 logger = get_logger("pwnviz.session")
 
 STOP_SYMBOL_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,127}$")
+SUBSCRIBER_QUEUE_MAX = 256
 
 EXEC_COMMANDS = {
     "step_instruction": "-exec-step-instruction",
@@ -116,7 +117,10 @@ class DebugSession:
 
     # ------------------------------------------------------------------ pub/sub
     def subscribe(self) -> asyncio.Queue[dict]:
-        queue: asyncio.Queue[dict] = asyncio.Queue()
+        # A slow/dead WebSocket subscriber must not grow an unbounded queue for
+        # every snapshot. Keep the newest events instead; the client can always
+        # recover the latest state from its initial REST/WS snapshot.
+        queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=SUBSCRIBER_QUEUE_MAX)
         self._subscribers.add(queue)
         return queue
 
@@ -160,6 +164,13 @@ class DebugSession:
         for queue in list(self._subscribers):
             try:
                 queue.put_nowait(event)
+            except asyncio.QueueFull:
+                # Drop the oldest queued event and retain the newest state.
+                try:
+                    queue.get_nowait()
+                    queue.put_nowait(event)
+                except (asyncio.QueueEmpty, asyncio.QueueFull):
+                    pass
             except Exception:  # pragma: no cover - subscriber teardown race
                 self._subscribers.discard(queue)
 
@@ -235,11 +246,21 @@ class DebugSession:
                 raise DebuggerError(
                     f"Could not launch GDB session: {type(exc).__name__}: {exc}"
                 ) from exc
+            except asyncio.CancelledError:
+                # Client disconnect / shutdown during startup must still release
+                # a GDB process that was already spawned.
+                await self._abort_launch(
+                    controller, RuntimeError("launch cancelled")
+                )
+                raise
 
         try:
             await controller.wait_for_stop(
                 epochs, timeout=self.settings.gdb_stop_timeout_seconds
             )
+        except asyncio.CancelledError:
+            await self._fail_session("Launch cancelled while waiting for initial stop")
+            raise
         except TargetExited:
             await self._wait_until_terminal(3.0)
             return None
@@ -264,8 +285,14 @@ class DebugSession:
                 await self._pump_task
             self._pump_task = None
         if controller is not None:
-            with contextlib.suppress(Exception):
+            try:
                 await controller.close()
+            except Exception:
+                logger.warning(
+                    "failed to close GDB controller during launch abort for %s",
+                    self.session_id,
+                    exc_info=True,
+                )
         self.controller = None
         self.collector = None
         await self._set_state(SessionState.ERROR)

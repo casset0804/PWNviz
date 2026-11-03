@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 
 from app.core.config import Settings, get_settings
 from app.core.errors import (
@@ -24,6 +23,7 @@ class SessionManager:
     def __init__(self) -> None:
         self._sessions: dict[str, DebugSession] = {}
         self._lock = asyncio.Lock()
+        self._cleanup_tasks: set[asyncio.Task[None]] = set()
 
     async def create(
         self, request: CreateSessionRequest, settings: Settings | None = None
@@ -93,8 +93,21 @@ class SessionManager:
             session = self._sessions.pop(session_id, None)
         if session is None:
             return False
-        with contextlib.suppress(Exception):
-            await session.terminate()
+        # Keep cleanup owned by a task: a cancelled DELETE request must not
+        # cancel the only GDB teardown path after the session was removed.
+        cleanup = asyncio.create_task(
+            session.terminate(), name=f"pwnviz-terminate-{session_id}"
+        )
+        self._cleanup_tasks.add(cleanup)
+        cleanup.add_done_callback(self._cleanup_tasks.discard)
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            logger.warning(
+                "terminate request cancelled; session cleanup continues for %s",
+                session_id,
+            )
+            raise
         logger.info("terminated session %s", session_id)
         return True
 
@@ -102,8 +115,12 @@ class SessionManager:
         sessions = list(self._sessions.values())
         self._sessions.clear()
         for session in sessions:
-            with contextlib.suppress(Exception):
+            try:
                 await session.terminate()
+            except Exception:
+                logger.exception("failed to terminate session %s", session.session_id)
+        if self._cleanup_tasks:
+            await asyncio.gather(*list(self._cleanup_tasks), return_exceptions=True)
 
 
 session_manager = SessionManager()

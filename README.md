@@ -43,11 +43,12 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
   - 点击汇编行仅选择，不创建断点；
   - 真实 WebSocket 推送驱动更新，断线重连，REST 动作与 WS 事件去重；
 - React + TypeScript + Vite + Tailwind + Zustand 深色 IDE 工作台；
-- 本机安全护栏：非 loopback 绑定默认拒绝、`Host` 白名单、
-  跨站浏览器请求拒绝、CORS 收紧、子进程组超时清理；
-- 单元测试与真实环境集成测试（pytest，含真实 GDB 会话与 MI 控制器测试）；
-- Playwright 之外的 CDP E2E：`scripts/ui_smoke.mjs` 真实点击 Run/StepI、
-  检查栈/寄存器/diff/terminate；
+- 本机安全护栏：非 loopback 绑定默认拒绝、HTTP/WS 非 loopback 客户端中间件、
+  `Host` 白名单、跨站浏览器请求拒绝、CORS 收紧、子进程组超时清理；
+- 生命周期清理：DELETE/取消/退出/reader 失败均回收 GDB，WebSocket 队列有界；
+- 单元测试与真实环境集成测试（pytest 110 passed，含真实 GDB 会话与 MI 控制器测试）；
+- CDP E2E：`scripts/ui_smoke.mjs` 真实点击 Run/StepI、
+  检查栈/寄存器/diff/terminate；前端单测 13 passed；
 - 环境检查脚本在本机 0 failure / 0 warning。
 
 ![Phase 2 工作台（真实 GDB 会话）](docs/assets/workbench-phase2.png)
@@ -180,7 +181,7 @@ Memory Inspector 选择、汇编选择、Diff 标签与 Terminate，并输出截
 | `API_HOST` | `127.0.0.1` | 后端绑定地址；非 loopback 默认拒绝启动 |
 | `API_PORT` | `8000` | 后端绑定端口（非法值回退 8000） |
 | `ALLOWED_SAMPLE_DIR` | `<repo>/samples` | 只允许发现该目录之下的样例 |
-| `PWNVIZ_ALLOW_REMOTE` | `0` | 显式允许非 loopback 绑定（不推荐） |
+| `PWNVIZ_ALLOW_REMOTE` | `0` | 显式允许非 loopback 绑定与客户端（无认证，不推荐） |
 | `PWNVIZ_ALLOWED_HOSTS` | `127.0.0.1,localhost,testserver` | `Host` 头白名单 |
 | `PWNVIZ_GDB_ARGS` | `--quiet --nx --interpreter=mi3` | 持久 GDB 启动参数（自动移除 `--batch`） |
 | `PWNVIZ_GDB_STOP_TIMEOUT_SECONDS` | `15` | 等待 `*stopped` 的预算 |

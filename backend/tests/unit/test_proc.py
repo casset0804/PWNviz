@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import stat
 import time
@@ -67,3 +68,33 @@ async def test_timeout_kills_grandchildren(tmp_path: Path) -> None:
             break
         time.sleep(0.1)
     assert not _process_alive(pid), f"grandchild {pid} survived process-group kill"
+
+
+@pytest.mark.skipif(
+    os.name != "posix" or not Path("/proc/self/stat").exists(),
+    reason="requires POSIX process groups and /proc",
+)
+async def test_cancellation_kills_probe_process_group(tmp_path: Path) -> None:
+    pid_file = tmp_path / "probe.pid"
+    script = _script(
+        tmp_path,
+        f"echo $$ > {pid_file}\nsleep 30",
+    )
+
+    task = asyncio.create_task(run_command([str(script)], timeout=30))
+    for _ in range(50):
+        if pid_file.exists():
+            break
+        await asyncio.sleep(0.05)
+    assert pid_file.exists(), "probe process did not start"
+    pid = int(pid_file.read_text(encoding="utf-8").strip())
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    for _ in range(50):
+        if not _process_alive(pid):
+            break
+        await asyncio.sleep(0.1)
+    assert not _process_alive(pid), f"probe {pid} survived cancellation cleanup"

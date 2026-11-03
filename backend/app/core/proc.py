@@ -105,6 +105,14 @@ async def run_command(
         stdout_b, stderr_b = await asyncio.wait_for(
             process.communicate(), timeout=timeout
         )
+    except asyncio.CancelledError:
+        # A cancelled FastAPI request / shutdown must not orphan a probe GDB.
+        _kill_process_tree(process)
+        try:
+            await asyncio.wait_for(process.wait(), timeout=KILL_DRAIN_TIMEOUT_SECONDS)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass
+        raise
     except asyncio.TimeoutError:
         timed_out = True
         _kill_process_tree(process)

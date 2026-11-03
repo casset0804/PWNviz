@@ -122,7 +122,10 @@ class MIController:
         return Epochs(stop=self._stop_epoch, exit=self._exit_epoch)
 
     async def start(self) -> None:
-        await asyncio.to_thread(self._gdb.start)
+        # Popen + IoManager setup is short and must not run in a worker thread:
+        # if the surrounding request is cancelled, the thread could spawn GDB
+        # after the session has already been cleaned up.
+        self._gdb.start()
         self._reader_task = asyncio.create_task(
             self._read_loop(), name="pwnviz-mi-reader"
         )
@@ -147,22 +150,37 @@ class MIController:
     async def close(self) -> None:
         if self._closed:
             return
-        # Ask GDB to exit first so it can kill the inferior; the process-group
-        # kill below is the safety net if it hangs or was already wedged.
-        if self._gdb.alive:
-            try:
-                await asyncio.to_thread(self._gdb.write, "-gdb-exit")
-            except GdbProcessError:
-                pass
-            await asyncio.to_thread(self._gdb.wait_exit, 2.0)
+        # Stop accepting commands immediately. The process cleanup below runs in
+        # a synchronous finally block so cancellation of the owning request/task
+        # cannot leave GDB or its process group behind.
         self._closed = True
-        await asyncio.to_thread(self._gdb.close)
-        if self._reader_task is not None:
-            self._reader_task.cancel()
+        reader = self._reader_task
+        self._reader_task = None
+        try:
+            # Ask GDB to exit first so it can kill the inferior; the process-group
+            # kill below is the safety net if it hangs or was already wedged.
+            if self._gdb.alive:
+                try:
+                    await asyncio.to_thread(self._gdb.write, "-gdb-exit")
+                except GdbProcessError:
+                    pass
+                await asyncio.to_thread(self._gdb.wait_exit, 2.0)
+        finally:
+            try:
+                self._gdb.kill()
+            except Exception:
+                logger.warning("failed to kill GDB process group", exc_info=True)
+            try:
+                self._gdb.close()
+            except Exception:
+                logger.warning("failed to close GDB pipes", exc_info=True)
+            if reader is not None:
+                reader.cancel()
+            self._kill_orphan_inferior()
+
+        if reader is not None:
             with contextlib.suppress(asyncio.CancelledError):
-                await self._reader_task
-            self._reader_task = None
-        self._kill_orphan_inferior()
+                await reader
         await self._notify_state()
         self._events.put_nowait({"type": "closed"})
 

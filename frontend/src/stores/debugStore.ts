@@ -285,28 +285,35 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
     try {
       await api.deleteSession(session.session_id);
     } catch (error) {
-      if (!(error instanceof ApiError && error.status === 404)) {
-        set({ error: errorMessage(error) });
+      if (error instanceof ApiError && error.status === 404) {
+        // Already gone on the backend; fall through and clear local state.
+      } else {
+        const message = `terminate failed: ${errorMessage(error)}`;
+        set({ error: message, busy: false });
+        get().appendLog("error", message);
+        // Keep the session and WebSocket so the user can retry DELETE. Clearing
+        // local state here would hide a still-running GDB/inferior.
+        return;
       }
-    } finally {
-      closeStream(true);
-      set({
-        session: null,
-        debuggerState: "IDLE",
-        snapshot: null,
-        previousSnapshot: null,
-        history: [],
-        selectedByteAddress: null,
-        selectedInstructionAddress: null,
-        scrollTarget: null,
-        streamStatus: "closed",
-        busy: false,
-        error: null,
-        bottomTab: "environment",
-      });
-      window.history.replaceState(null, "", window.location.pathname);
-      get().appendLog("info", "session terminated");
     }
+
+    closeStream(true);
+    set({
+      session: null,
+      debuggerState: "IDLE",
+      snapshot: null,
+      previousSnapshot: null,
+      history: [],
+      selectedByteAddress: null,
+      selectedInstructionAddress: null,
+      scrollTarget: null,
+      streamStatus: "closed",
+      busy: false,
+      error: null,
+      bottomTab: "environment",
+    });
+    window.history.replaceState(null, "", window.location.pathname);
+    get().appendLog("info", "session terminated");
   },
 }));
 

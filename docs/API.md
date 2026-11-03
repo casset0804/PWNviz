@@ -19,6 +19,7 @@ Base URL：`http://127.0.0.1:8000`（WSL 内 uvicorn）。
 |---|---|---|
 | 400 | （Starlette）`Invalid host header` | `Host` 不在 `PWNVIZ_ALLOWED_HOSTS` 白名单 |
 | 403 | `cross_site_blocked` | 浏览器跨站请求（`Sec-Fetch-Site: cross-site`） |
+| 403 | `non_local_client` | 非 loopback 客户端；除非 `PWNVIZ_ALLOW_REMOTE=1` |
 | 404 | `sample_not_found` | 样例不存在 |
 | 404 | `session_not_found` | 会话不存在或已删除 |
 | 409 | `invalid_session_state` | 动作与当前状态不符（如未 launch 就 step） |
@@ -157,7 +158,7 @@ credentials；跨站浏览器请求在到达路由前被拒绝；`Host` 头受�
 | `PWNDBG_INIT` | `pwndbg.path` / `pwndbg.gdbinit` 的优先候选 |
 | `ALLOWED_SAMPLE_DIR` | `samples.directory` 与样例扫描根目录 |
 | `API_HOST` / `API_PORT` | 后端监听地址（`python -m app`） |
-| `PWNVIZ_ALLOW_REMOTE` | 允许非 loopback 绑定（默认拒绝） |
+| `PWNVIZ_ALLOW_REMOTE` | 允许非 loopback 绑定与客户端（默认拒绝） |
 | `PWNVIZ_ALLOWED_HOSTS` | `Host` 头白名单（默认 `127.0.0.1,localhost,testserver`） |
 
 ### GDB 缺失时
@@ -362,14 +363,18 @@ GDB 启动/命令失败 → `502 debugger_error`，会话进入 `ERROR` 并回�
 ## DELETE `/api/v1/sessions/{session_id}`
 
 `204 No Content`。发送 `-gdb-exit`，等待 GDB 退出，必要时 kill 整个进程组，
-然后从管理器移除；GDB 与 inferior 进程都应消失。
+然后从管理器移除；GDB 与 inferior 进程都应消失。DELETE 请求本身被取消时，
+后端仍会在受保护的管理器 task 中完成清理。
 
 ## WS `/api/v1/sessions/{session_id}/stream`
 
 - 只接受已存在 session；未知 id 以 `4404` 关闭；
 - 浏览器 `Origin` 不在 `PWNVIZ_ALLOWED_ORIGINS` 时以 `4403` 关闭；
+- 默认还要求客户端为 loopback；非 loopback 以 `4403` 关闭（除非
+  `PWNVIZ_ALLOW_REMOTE=1`）；
 - 连接后先推当前 `session.state`，若有历史再推最近一条 `snapshot`；
-- 之后实时推送状态/快照；DELETE 时推送 `session.terminated` 后关闭。
+- 之后实时推送状态/快照；DELETE 时推送 `session.terminated` 后关闭；
+- 每订阅队列上限 256 条；慢客户端满队列时丢弃最旧事件，保留最新状态。
 
 事件结构：`{"type": "...", "session_id": "...", "payload": {...}}`。
 

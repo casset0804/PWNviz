@@ -502,7 +502,7 @@ changed_bytes = [{address: 0x7fffffffe274, before: 00, after: 0a}]
 ### 15.4 测试结果
 
 ```text
-102 passed in 53.18s
+110 passed in 48.23s
 ```
 
 核心真实集成测试：
@@ -531,7 +531,11 @@ tests/integration/test_mi_controller.py
 tests/unit/test_memory_unreadable.py
 tests/unit/test_diff.py
 tests/unit/test_mi_reader_failure.py
+tests/unit/test_mi_close_cancel.py
 tests/unit/test_session_failure.py
+tests/unit/test_proc.py
+tests/unit/test_local_client_middleware.py
+tests/unit/test_subscriber_backpressure.py
 ```
 
 验证点：
@@ -581,7 +585,7 @@ tests/unit/test_session_failure.py
 - 新增失败路径测试：
   `tests/unit/test_mi_reader_failure.py`、`tests/unit/test_session_failure.py`，
   以及 `test_continue_to_exit_and_cleanup` 中“退出后自动释放 GDB”断言。
-- 真实 GDB 集成测试未删除、未改为 mock；最终 102 passed。
+- 真实 GDB 集成测试未删除、未改为 mock；当前 110 passed。
 
 ## 16. Phase 2 前端可视化实测（2026-11-03）
 
@@ -644,18 +648,65 @@ node scripts/ui_smoke.mjs
 
 ```text
 npm test
+✓ src/stores/debugStore.test.ts (2 tests)
 ✓ src/lib/snapshot.test.ts (5 tests)
 ✓ src/lib/address.test.ts (6 tests)
-Test Files 2 passed (2)
-Tests 11 passed (11)
+Test Files 3 passed (3)
+Tests 13 passed (13)
 
 tsc --noEmit && vite build
 ✓ 38 modules transformed
-dist/assets/index-*.js 275.41 kB
+dist/assets/index-*.js 275.48 kB
 ```
 
 测试覆盖：64-bit BigInt 精确性、地址格式化/比较/行内 offset、RSP/RBP marker、
-outside-window、changed-byte map、unreadable null 与 previous register 值。
-测试 fixture 仅在 `src/lib/*.test.ts` 中，标记为测试数据，不进入运行时。
+outside-window、changed-byte map、unreadable null、previous register 值，以及
+DELETE 失败时保留 session 供重试。测试 fixture 仅在 `*.test.ts` 中明确标记为测试
+数据，不进入运行时。
 
-未发现需要修改后端 GDB 采集逻辑的 bug；本轮未修改采集链路。
+未发现需要修改寄存器/内存/反汇编采集器的 bug；本轮修改的是 GDB 生命周期、
+取消清理、客户端边界与 WebSocket 背压。
+
+## 17. 第二轮系统/安全 Review（2026-11-03）
+
+### 17.1 分级结论
+
+- **Critical：无**（前提仍是本机单用户、可信样例、默认 loopback）。
+- **High：4 项，已修复**：
+  1. GDB 生命周期对任务取消不安全：launch/close/probe 被取消时可能留下 GDB
+     子进程；
+  2. 前端 Terminate 在 DELETE 失败时仍清空本地 session，隐藏仍存活的 GDB，
+     用户无法重试；
+  3. `uvicorn app.main:app --host 0.0.0.0` 可绕过 `python -m app` 的本地绑定
+     保护；
+  4. WebSocket 订阅队列无界，慢/死客户端可积累事件造成内存压力。
+- **Medium**：无 session 空闲 TTL；后端 `SIGKILL` 时无 PDEATHSIG/监督进程；
+  无用户认证（session ID 即 bearer）；`PWNVIZ_ALLOW_REMOTE=1` 时无认证；
+  WebSocket 无 heartbeat；无 CSP/Cache-Control。
+- **Low**：`testserver` 在 Host 白名单；`/docs` 本地暴露；测试依赖 warning。
+
+### 17.2 修复
+
+- `MIController.start` 改为同步 Popen 设置，消除“取消后线程才启动 GDB”的窗口；
+- `MIController.close` 在同步 `finally` 中执行进程组 kill、GDB close、reader
+  cancel 与 orphan inferior 清理，任务取消不能跳过清理；
+- `DebugSession.launch` 捕获 `CancelledError`：启动阶段取消调用 `_abort_launch`，
+  等待 initial stop 阶段取消调用 `_fail_session`；
+- `SessionManager.terminate` 把清理放进受 shield 保护、管理器持有引用的 task，
+  DELETE 请求取消后清理仍继续；
+- `run_command` 在取消时 killpg 并回收探测子进程；
+- 新增 `LocalOnlyMiddleware`：默认拒绝非 loopback HTTP/WebSocket 客户端（除非
+  `PWNVIZ_ALLOW_REMOTE=1` 或 TestClient），覆盖直接 uvicorn 启动；
+- `DebugSession.subscribe` 队列上限 256，满时丢最旧事件保留最新状态；
+- 前端 `terminate` 在 DELETE 失败时保留 session/WS 并设置错误，允许重试；
+- 新增测试：`test_mi_close_cancel.py`、`test_proc.py::test_cancellation...`、
+  `test_session_failure.py::test_cancelled_launch...`、
+  `test_local_client_middleware.py`、`test_subscriber_backpressure.py`、
+  `debugStore.test.ts`。
+
+### 17.3 验证
+
+- 后端：`110 passed, 1 warning`（真实 GDB 集成测试未删除、未 mock 成功路径）；
+- 前端：`13 passed`，`tsc --noEmit && vite build` 成功；
+- 真实 UI E2E 仍通过 Run → StepI → changed cell → RSP scroll → Terminate
+  （见 16.2；本轮后端中间件未改变 loopback 访问路径）。

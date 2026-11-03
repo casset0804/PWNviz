@@ -23,7 +23,7 @@ from app.api import (
 from app.core.config import get_settings
 from app.core.errors import PwnvizError
 from app.core.logging import configure_logging
-from app.core.security import is_loopback_host
+from app.core.security import is_loopback_host, LocalOnlyMiddleware
 from app.sessions.manager import session_manager
 
 logger = logging.getLogger("pwnviz")
@@ -66,6 +66,11 @@ def create_app() -> FastAPI:
     # 127.0.0.1 still sends Host: evil.example, which must not be accepted.
     app.add_middleware(
         TrustedHostMiddleware, allowed_hosts=list(settings.allowed_hosts)
+    )
+    # Keep the local-only boundary even when a process manager launches
+    # ``uvicorn app.main:app --host 0.0.0.0`` instead of ``python -m app``.
+    app.add_middleware(
+        LocalOnlyMiddleware, allow_remote=settings.allow_remote
     )
 
     @app.middleware("http")
