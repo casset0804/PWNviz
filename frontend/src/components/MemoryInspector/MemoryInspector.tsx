@@ -1,47 +1,135 @@
+import { useDebugStore } from "../../stores/debugStore";
+import { changedBytesMap, findCell } from "../../lib/snapshot";
+import { addressInWindow } from "../../lib/address";
 import { StatusBadge } from "../common/StatusBadge";
 
 export function MemoryInspector() {
+  const snapshot = useDebugStore((state) => state.snapshot);
+  const selectedAddress = useDebugStore((state) => state.selectedByteAddress);
+  const selectedInstructionAddress = useDebugStore(
+    (state) => state.selectedInstructionAddress,
+  );
+
+  const cell = findCell(snapshot, selectedAddress);
+  const changed = changedBytesMap(snapshot);
+  const change = cell ? changed.get(cell.address) : undefined;
+  const selectedInstruction =
+    snapshot?.instruction &&
+    selectedInstructionAddress &&
+    snapshot.instruction.address === selectedInstructionAddress
+      ? snapshot.instruction
+      : snapshot?.disassembly.find(
+          (line) => line.address === selectedInstructionAddress,
+        ) ?? null;
+
   return (
-    <div className="flex h-full flex-col gap-3 p-4">
-      <div className="flex items-center gap-2">
-        <StatusBadge tone="idle">phase 2</StatusBadge>
+    <div className="space-y-3 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusBadge tone={cell ? "ok" : "idle"}>
+          {cell ? "byte selected" : "no cell selected"}
+        </StatusBadge>
         <span className="text-[11px] text-slate-500">
-          Arbitrary address inspection arrives after the snapshot pipeline.
+          Click any stack byte cell to inspect it. Values are taken directly from the current
+          snapshot.
         </span>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="font-mono text-[11px] text-slate-500" htmlFor="mem-addr">
-          address
-        </label>
-        <input
-          id="mem-addr"
-          disabled
-          placeholder="0x00007fffffffe000"
-          className="w-64 rounded border border-[#263044] bg-[#0a0e14] px-2 py-1 font-mono text-xs text-slate-500 placeholder:text-slate-700"
-        />
-        <label className="font-mono text-[11px] text-slate-500" htmlFor="mem-len">
-          length
-        </label>
-        <input
-          id="mem-len"
-          disabled
-          placeholder="0x100"
-          className="w-24 rounded border border-[#263044] bg-[#0a0e14] px-2 py-1 font-mono text-xs text-slate-500 placeholder:text-slate-700"
-        />
-        <button
-          type="button"
-          disabled
-          className="cursor-not-allowed rounded border border-[#263044] bg-[#111722] px-2 py-1 font-mono text-[11px] text-slate-600"
-        >
-          read
-        </button>
-      </div>
-      <p className="max-w-2xl text-[11px] leading-5 text-slate-500">
-        The inspector will call{" "}
-        <span className="font-mono text-slate-400">-data-read-memory-bytes</span> on
-        the live inferior. Unreadable regions are reported as such instead of being
-        guessed or zero-filled.
-      </p>
+
+      {!snapshot ? (
+        <p className="font-mono text-[11px] text-slate-600">
+          No snapshot yet. Launch a session and stop at main.
+        </p>
+      ) : null}
+
+      {cell ? (
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded border border-[#1e2635] bg-[#0d1117] p-3">
+            <div className="text-[10px] uppercase tracking-[0.14em] text-slate-600">
+              address
+            </div>
+            <div className="mt-1 break-all font-mono text-[12px] text-cyan-200" data-testid="inspector-address">
+              {cell.address}
+            </div>
+            <div className="mt-2 text-[10px] text-slate-600">
+              byte offset {cell.offset} in row {cell.row.address}
+            </div>
+          </div>
+          <div className="rounded border border-[#1e2635] bg-[#0d1117] p-3">
+            <div className="text-[10px] uppercase tracking-[0.14em] text-slate-600">
+              byte
+            </div>
+            <div
+              className={`mt-1 font-mono text-[18px] ${
+                cell.byte === null ? "text-rose-300" : "text-slate-100"
+              }`}
+              data-testid="inspector-byte"
+            >
+              {cell.byte ?? "unreadable"}
+            </div>
+            <div className="mt-2 text-[10px] text-slate-600">
+              {cell.byte === null
+                ? "GDB could not read this byte; shown as unknown, not zero."
+                : `decimal ${parseInt(cell.byte, 16)}`}
+            </div>
+          </div>
+          <div className="rounded border border-[#1e2635] bg-[#0d1117] p-3">
+            <div className="text-[10px] uppercase tracking-[0.14em] text-slate-600">
+              qword (little-endian)
+            </div>
+            <div className="mt-1 break-all font-mono text-[12px] text-slate-200">
+              {cell.row.qword_le ?? "unreadable"}
+            </div>
+            <div className="mt-2 truncate font-mono text-[10px] text-slate-600" title={cell.row.ascii ?? ""}>
+              ASCII {cell.row.ascii ?? "unreadable"}
+            </div>
+          </div>
+          <div className="rounded border border-[#1e2635] bg-[#0d1117] p-3">
+            <div className="text-[10px] uppercase tracking-[0.14em] text-slate-600">
+              row / diff
+            </div>
+            <div className="mt-1 font-mono text-[11px] text-slate-300">
+              {cell.row.readable ? "readable" : "unknown bytes"}
+            </div>
+            <div className="mt-1 font-mono text-[10px] text-slate-500">
+              range {cell.row.address} + 8 bytes
+            </div>
+            {change ? (
+              <div className="mt-2 font-mono text-[10px] text-emerald-300">
+                {change.before ?? "unknown"} → {change.after ?? "unknown"}
+              </div>
+            ) : (
+              <div className="mt-2 text-[10px] text-slate-600">unchanged vs previous snapshot</div>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {selectedInstruction ? (
+        <div className="rounded border border-amber-500/25 bg-amber-500/5 p-3">
+          <div className="text-[10px] uppercase tracking-[0.14em] text-amber-300/80">
+            selected instruction
+          </div>
+          <div className="mt-1 font-mono text-[12px] text-slate-200">
+            {selectedInstruction.address} · {selectedInstruction.text}
+          </div>
+          <div className="mt-1 text-[10px] text-slate-500">
+            Selection only; no breakpoint is created.
+          </div>
+        </div>
+      ) : null}
+
+      {cell && !addressInWindow(cell.address, snapshot?.stack.range_start ?? null, snapshot?.stack.range_end ?? null) ? (
+        <p className="font-mono text-[10px] text-rose-300">
+          Selected address is outside the current stack window.
+        </p>
+      ) : null}
+
+      {snapshot?.warnings.length ? (
+        <ul className="space-y-1 rounded border border-amber-500/20 bg-amber-500/5 p-2 font-mono text-[10px] text-amber-200/80">
+          {snapshot.warnings.slice(0, 5).map((warning) => (
+            <li key={warning}>• {warning}</li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 # 开发阶段与验收计划
 
-每一阶段结束时项目必须仍可启动。当前仓库状态：**Phase 0 已实现，Phase 1 后端
-真实调试链路已完成并通过真实 GDB 集成测试**；前端会话/栈视图接线留到 Phase 2。
+每一阶段结束时项目必须仍可启动。当前仓库状态：**Phase 0/1 已完成，Phase 2
+核心前端可视化已完成并通过真实 GDB UI E2E**；断点/源码/DWARF 留到 Phase 3/4。
 
 ## Phase 0：环境探测与骨架
 
@@ -39,8 +39,7 @@
 ## Phase 1：真实 GDB 单步闭环（后端已完成）
 
 目标：Step Instruction → 真实 GDB 执行一条机器指令 → 采集真实快照 →
-前端（Phase 2）看到新 RIP/RSP 和栈内存变化。当前后端链路已完成并通过真实测试，
-前端尚未接线。
+前端看到新 RIP/RSP 和栈内存变化。后端链路与 Phase 2 前端均已通过真实测试。
 
 ### 1.1 会话与进程（完成）
 
@@ -92,21 +91,29 @@
 - [ ] 50 次连续快速 Step 压力测试：目前覆盖单步、finish、continue、
       并发拒绝，尚未做 50 次循环。
 
-## Phase 2：图形化栈视图
+## Phase 2：图形化栈视图（已完成）
 
-- 地址行 + 8 byte cells + little-endian qword + ASCII；
-- RSP/RBP/RIP 标记，高地址在上、低地址在下，文字说明方向；
-- changed bytes 高亮（同时保留文字/图标）；
-- 点击 byte cell 显示地址与解释；
-- 地址全程字符串，不经过 Number。
+- [x] 地址行 + 8 byte cells + little-endian qword + ASCII；
+- [x] RSP/RBP 标记由 snapshot.registers 的真实地址定位到行/byte offset；
+      不在窗口时显示 outside 提示；
+- [x] 高地址在上、低地址在下，明确 HIGH ADDRESS / LOW ADDRESS / grows downward；
+- [x] changed bytes 高亮 + 文字标签 + 150–300ms 动画开关（220ms）；
+- [x] 点击 byte cell 显示地址、byte、qword、ASCII、diff；
+- [x] 点击 RSP/RBP 滚动到对应行；
+- [x] 地址全程字符串；比较/排序使用 BigInt，不经过 Number；
+- [x] unreadable 区域以 `--`/unknown/条纹显示，不用 00 伪装；
+- [x] Zustand 单一 snapshot 派生所有视图；
+- [x] 真实 UI E2E：Run → StepI → changed cell → Inspector → Disasm 选择 → Diff
+      → Terminate；`scripts/ui_smoke.mjs`。
 
-## Phase 3：调试工作台联动
+## Phase 3：调试工作台联动（部分完成）
 
-- 寄存器面板真实值 + before/after；
-- 反汇编面板高亮当前 RIP；
-- 工具栏动作真实可用；
-- WebSocket 实时推送、断线重连；
-- session 状态机与错误提示。
+- [x] 寄存器面板真实值 + before/after；
+- [x] 反汇编面板高亮当前 RIP、点击选择；
+- [x] 工具栏动作真实可用（Run/Continue/Pause/StepI/NextI/Next/Finish/Terminate）；
+- [x] WebSocket 实时推送、断线重连；
+- [x] session 状态机与错误提示；
+- [ ] 断点增删、源码视图。
 
 ## Phase 4：教学语义增强
 

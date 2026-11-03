@@ -11,7 +11,7 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
 
 ---
 
-## 当前状态：Phase 1（真实 GDB 调试链路已打通，前端 UI 尚未接线）
+## 当前状态：Phase 2（真实 GDB 调试链路 + 核心前端可视化）
 
 已完成：
 
@@ -31,24 +31,35 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
     字节级 diff；
   - `POST/GET/DELETE /api/v1/sessions...` 与
     `WS /api/v1/sessions/{id}/stream`（`session.state` + `snapshot`）；
-  - 会话数量上限、进程组清理、启动失败/超时错误状态；
-- React + TypeScript + Vite + Tailwind + Zustand 深色 IDE 工作台骨架，
-  环境面板展示真实探测结果；
+- **Phase 2 前端可视化**：
+  - Zustand 单一 debug store：session / state / 当前 snapshot / history /
+    selected address / UI preferences；
+  - 深色 IDE 工作台：Debug Toolbar、Disassembly、Stack Memory Canvas、
+    Registers、Memory Inspector / Diff / Explanation / Debug Log；
+  - 栈画布按 8-byte 行展示地址、byte cells、little-endian qword、ASCII，
+    高地址在上、低地址在下，RSP/RBP 由真实寄存器地址定位；
+  - `diff.changed_bytes` 高亮 + 150–300ms 动画开关；寄存器显示 before/after；
+  - 点击 byte cell 检查地址/字节/qword/ASCII；点击 RSP/RBP 滚动到对应行；
+  - 点击汇编行仅选择，不创建断点；
+  - 真实 WebSocket 推送驱动更新，断线重连，REST 动作与 WS 事件去重；
+- React + TypeScript + Vite + Tailwind + Zustand 深色 IDE 工作台；
 - 本机安全护栏：非 loopback 绑定默认拒绝、`Host` 白名单、
   跨站浏览器请求拒绝、CORS 收紧、子进程组超时清理；
 - 单元测试与真实环境集成测试（pytest，含真实 GDB 会话与 MI 控制器测试）；
+- Playwright 之外的 CDP E2E：`scripts/ui_smoke.mjs` 真实点击 Run/StepI、
+  检查栈/寄存器/diff/terminate；
 - 环境检查脚本在本机 0 failure / 0 warning。
 
-![Phase 0/环境面板（真实探测结果）](docs/assets/workbench-phase0.png)
+![Phase 2 工作台（真实 GDB 会话）](docs/assets/workbench-phase2.png)
 
-> 截图是 Phase 0 的工作台：当前前端仍只展示环境探测，尚未接线 Phase 1 的
-> 会话/快照 UI（按计划留到 Phase 2）。后端调试链路已由真实集成测试覆盖。
+> 截图来自真实 GDB 会话：RSP、RBP、RIP 与栈字节均来自后端 Snapshot；
+> 高亮的 `0a` 是 StepI 后 diff 检测到的真实栈字节变化。
 
 尚未实现（后续阶段）：
 
-- 前端工具栏与栈内存视图接入真实 session（Phase 2）；
-- breakpoint 增删 API、源码视图、变量/DWARF 语义（Phase 3/4）；
-- 前端 WebSocket 客户端与快照回放。
+- 断点增删、源码视图、DWARF 变量/类型语义（Phase 3/4）；
+- 快照历史时间轴回放；
+- 更完整的指令解释规则（当前只陈述实测 before/after）。
 
 阶段计划与验收标准见 [docs/PHASES.md](docs/PHASES.md)。
 
@@ -115,8 +126,9 @@ npm install
 npm run dev
 ```
 
-打开 <http://127.0.0.1:5173>。页面底部的 **Environment** 标签展示后端真实探测结果；
-GDB / MI3 / pwndbg / 样例状态一目了然。
+打开 <http://127.0.0.1:5173>。选择目标后点击 **Run** 创建真实会话并停在 `main`；
+点击 **StepI/NextI/Next/Finish**，栈画布、寄存器、反汇编与 diff 会随真实 GDB
+快照更新。底部 **Environment** 标签仍展示真实主机探测结果。
 
 ### 6. 运行测试
 
@@ -133,6 +145,29 @@ pwndbg 可用时真实加载它；`tests/integration/test_gdb_mi_smoke.py` 还�
 `test_session_lifecycle.py` 通过 REST 跑完整会话（launch → 快照 → stepi → diff
 → finish → 终止清理），`test_websocket_stream.py` 验证实时推送。
 不会用 mock 冒充调试成功。
+
+前端 UI 的真实验收（需要后端 + Vite 已启动，Edge 开启 CDP）：
+
+```powershell
+& "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" `
+  --headless=new --disable-gpu --remote-debugging-port=9223 `
+  --user-data-dir="$env:TEMP\pwnviz-edge" about:blank
+```
+
+```bash
+node scripts/ui_smoke.mjs
+```
+
+前端纯函数单测（地址 BigInt / marker / unreadable / diff）：
+
+```bash
+cd frontend
+npm test
+```
+
+该脚本真实点击 Run / StepI，检查栈画布行数、RSP/RBP marker、changed cell、
+Memory Inspector 选择、汇编选择、Diff 标签与 Terminate，并输出截图到
+`docs/assets/workbench-phase2.png`。
 
 ### 7. 配置（`.env`）
 
@@ -170,7 +205,7 @@ Pwnvis/
 │       ├── components/       # Toolbar / StackMemoryView / RegisterPanel / ...
 │       ├── hooks/            # useCapabilities / useSamples
 │       ├── services/         # 类型化 API 客户端
-│       ├── stores/           # Zustand session/UI 状态
+│       ├── stores/           # Zustand 单一 debug 状态（snapshot/session/UI）
 │       └── types/            # 与后端 schema 对齐的 TS 类型
 ├── backend/                  # FastAPI
 │   ├── app/

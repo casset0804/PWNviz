@@ -93,22 +93,37 @@ ready = gdb.available
 src/
 ├── app/Workbench.tsx          3 栏 IDE 布局 + 底部 Dock + 状态栏
 ├── components/
-│   ├── Toolbar/               目标选择、连接/就绪状态、动作按钮（Phase 2 接入 session）
-│   ├── DisassemblyView/       占位：等真实快照
-│   ├── StackMemoryView/       占位：展示计划中的地址行/字节格/图例
-│   ├── RegisterPanel/         占位：寄存器名列表，无值
-│   ├── MemoryInspector/       Phase 2 占位
-│   ├── ExplanationPanel/      Phase 4 规则说明
+│   ├── Toolbar/               目标选择、状态、Run/Continue/Pause/StepI/NextI/Next/Finish/Terminate
+│   ├── DisassemblyView/       快照反汇编、RIP 高亮、点击选择
+│   ├── StackMemoryView/       地址/8 byte cells/qword/ASCII/RSP/RBP/changed/unknown
+│   ├── RegisterPanel/         真实寄存器 + changed before→after
+│   ├── MemoryInspector/       选中 byte 的地址、值、qword、ASCII、diff
+│   ├── DiffPanel/             寄存器与绝对地址字节级 diff
+│   ├── ExplanationPanel/      仅陈述实测 before/after，不模拟指令
 │   ├── EnvironmentPanel/      真实探测结果（GDB/pwndbg/样例/警告）
-│   └── BottomDock/            Environment / Memory / Diff / Explanation / Log 标签
+│   ├── DebugLogPanel/         session/WS/action 事件
+│   └── BottomDock/            Memory / Diff / Explanation / Log / Environment
 ├── hooks/useCapabilities.ts   探测请求、verify pwndbg、错误状态
 ├── hooks/useSamples.ts        样例列表
-├── services/api.ts            类型化 fetch，统一错误映射
-├── stores/sessionStore.ts     Zustand：选中样例、底部标签
-└── types/api.ts               与后端 schema 对齐的类型
+├── lib/address.ts             地址解析/格式化/比较（BigInt，无 Number 地址）
+├── lib/snapshot.ts            同一 snapshot 派生 marker/选中 cell/previous 值
+├── services/api.ts            REST + WebSocket URL，统一错误映射
+├── stores/debugStore.ts       Zustand 单一 debug 状态 + WS 重连/去重
+└── types/api.ts, debug.ts     与后端 schema 对齐的类型
 ```
 
-占位面板全部显式声明 “no live session / phase N”，不显示任何编造的寄存器或地址。
+数据一致性：
+
+- 组件不维护独立 register/stack 状态；全部从 `debugStore.snapshot` /
+  `previousSnapshot` / `history` 派生；
+- RSP/RBP marker 不使用后端 `annotations` 作为事实，而是用
+  `snapshot.registers` + BigInt 地址计算行与 byte offset；不在窗口时显示
+  “outside the current stack window”；
+- 地址仅作为十六进制字符串存储；排序/比较用 BigInt；`snapshot_id` 等非地址
+  计数才使用 Number；
+- `diff.changed_bytes` 的绝对地址用于 byte cell 高亮，动画 220ms，可关闭；
+- WS/REST 快照按 `snapshot_id` 去重，避免同一快照重复渲染/闪烁；
+- 无 snapshot 时显示 empty state，不展示 fixture/伪造寄存器值。
 
 ## 3. Phase 1 调试链路（已实现）
 

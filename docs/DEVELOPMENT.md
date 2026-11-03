@@ -566,7 +566,6 @@ tests/unit/test_session_failure.py
 ### 15.6 尚未解决的问题
 
 - 50 次连续快速 Step 压力测试尚未执行（已有单步/并发状态拒绝/超时测试）；
-- 前端尚未接入 session/snapshot（Phase 2）；
 - 无 session 空闲 TTL；目前依赖 DELETE 或后端 shutdown 清理；
 - 无断点增删、源码视图、DWARF 变量（Phase 3/4）；
 - 长时间运行的非交互目标依赖 interrupt；已用真实 sleep 程序验证一次。
@@ -583,3 +582,80 @@ tests/unit/test_session_failure.py
   `tests/unit/test_mi_reader_failure.py`、`tests/unit/test_session_failure.py`，
   以及 `test_continue_to_exit_and_cleanup` 中“退出后自动释放 GDB”断言。
 - 真实 GDB 集成测试未删除、未改为 mock；最终 102 passed。
+
+## 16. Phase 2 前端可视化实测（2026-11-03）
+
+### 16.1 实现
+
+- Zustand 单一 `debugStore`：session、debuggerState、当前 snapshot、previous
+  snapshot、history、selected byte/instruction、scroll target、动画偏好、
+  stream 状态、错误和日志；
+- 真实 REST + WebSocket：创建/launch/动作/终止；WS 断线重连；REST 与 WS
+  快照按 `snapshot_id` 去重；
+- Stack Memory Canvas：8-byte 行、地址、qword、ASCII、RSP/RBP byte marker、
+  changed 高亮、unknown/unreadable、HIGH/LOW 方向标签；
+- 地址工具使用 BigInt，无 `Number(address)`；
+- RSP 首次出现及变化时自动居中，RSP/RBP 点击可再次滚动；
+- Memory Inspector、Diff、Explanation、Debug Log、Environment 底部面板；
+- 动画 220ms，可关闭；仅 changed cells 动画，不重建画布。
+
+### 16.2 真实 UI E2E（CDP，非 fixture）
+
+命令（Edge 需以 `--remote-debugging-port=9223` 启动）：
+
+```bash
+node scripts/ui_smoke.mjs
+```
+
+实测结果：
+
+```json
+{
+  "ok": true,
+  "before": {
+    "snapshot": "snapshot #1",
+    "rip": "0x0000000000401160",
+    "rsp": "0x00007fffffffe270",
+    "rbp": "0x00007fffffffe280",
+    "rows": 64,
+    "markers": 2
+  },
+  "after": {
+    "snapshot": "snapshot #2",
+    "rip": "0x0000000000401167",
+    "changedCells": 1
+  },
+  "rspVisible": true,
+  "inspector": "0x00007fffffffe274",
+  "selection": true,
+  "terminated": true
+}
+```
+
+验证链路：真实点击 Run → 创建 GDB session/launch → 点击 StepI → 快照从 #1
+变为 #2、RIP `0x401160 → 0x401167`、1 个 changed byte（`0x...e274`）高亮 →
+点击 RSP 寄存器后对应行滚入视口 → 点击 changed cell 后 Inspector 显示地址 →
+点击汇编行出现 “selected instruction”（未创建断点）→ Diff 标签 → Terminate
+后后端 session 返回 404。
+
+截图：[assets/workbench-phase2.png](assets/workbench-phase2.png)。
+
+### 16.3 前端构建与单测
+
+```text
+npm test
+✓ src/lib/snapshot.test.ts (5 tests)
+✓ src/lib/address.test.ts (6 tests)
+Test Files 2 passed (2)
+Tests 11 passed (11)
+
+tsc --noEmit && vite build
+✓ 38 modules transformed
+dist/assets/index-*.js 275.41 kB
+```
+
+测试覆盖：64-bit BigInt 精确性、地址格式化/比较/行内 offset、RSP/RBP marker、
+outside-window、changed-byte map、unreadable null 与 previous register 值。
+测试 fixture 仅在 `src/lib/*.test.ts` 中，标记为测试数据，不进入运行时。
+
+未发现需要修改后端 GDB 采集逻辑的 bug；本轮未修改采集链路。

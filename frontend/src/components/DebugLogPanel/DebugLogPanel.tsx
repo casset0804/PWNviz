@@ -1,0 +1,54 @@
+import { useDebugStore } from "../../stores/debugStore";
+import { StatusBadge } from "../common/StatusBadge";
+
+export function DebugLogPanel() {
+  const log = useDebugStore((state) => state.log);
+  const session = useDebugStore((state) => state.session);
+  const streamStatus = useDebugStore((state) => state.streamStatus);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center gap-2 border-b border-[#1e2635] px-3 py-1.5">
+        <StatusBadge tone={streamStatus === "open" ? "ok" : "idle"}>
+          {streamStatus}
+        </StatusBadge>
+        <span className="font-mono text-[10px] text-slate-600">
+          {session ? session.session_id : "no session"}
+        </span>
+        <span className="ml-auto font-mono text-[10px] text-slate-600">
+          {log.length} entries
+        </span>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto p-2">
+        {log.length === 0 ? (
+          <p className="p-2 font-mono text-[10px] text-slate-600">
+            No session events yet. Create a session to see debugger events here.
+          </p>
+        ) : (
+          <ul className="space-y-0.5 font-mono text-[10px]">
+            {log
+              .slice()
+              .reverse()
+              .map((entry) => (
+                <li key={entry.id} className="flex gap-2 px-1 py-0.5">
+                  <span className="w-20 shrink-0 text-slate-700">{entry.at.slice(11, 19)}</span>
+                  <span
+                    className={`w-10 shrink-0 ${
+                      entry.level === "error"
+                        ? "text-rose-300"
+                        : entry.level === "event"
+                          ? "text-cyan-300"
+                          : "text-slate-600"
+                    }`}
+                  >
+                    {entry.level}
+                  </span>
+                  <span className="min-w-0 break-all text-slate-400">{entry.message}</span>
+                </li>
+              ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
