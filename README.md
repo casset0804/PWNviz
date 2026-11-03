@@ -24,7 +24,10 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
 - 内置样例 `samples/stack-basic/demo.c` 与编译脚本；
 - React + TypeScript + Vite + Tailwind + Zustand 深色 IDE 工作台骨架，
   环境面板展示真实探测结果；
-- 单元测试与真实环境集成测试（pytest，50 passed）；
+- 本机安全护栏：非 loopback 绑定默认拒绝、`Host` 白名单、
+  跨站浏览器请求拒绝、CORS 收紧、子进程组超时清理；
+- 单元测试与真实环境集成测试（pytest，75 passed），其中包含真实
+  GDB/MI3 load → break main → run → stepi → 读内存 → 清理的冒烟测试；
 - 环境检查脚本在本机 0 failure / 0 warning。
 
 ![Phase 0 工作台（真实探测结果）](docs/assets/workbench-phase0.png)
@@ -117,7 +120,9 @@ wsl -d Ubuntu-22.04 -- bash -lc 'cd /mnt/f/Pwnvis/backend && ~/.venvs/pwnviz/bin
 I/O 拖慢 pip），可用 `PWNVIZ_VENV` 覆盖。
 
 集成测试会真实启动 `gdb --version`、`gdb --batch --interpreter=mi3`，并在
-pwndbg 可用时真实加载它；不会用 mock 冒充调试成功。
+pwndbg 可用时真实加载它；`tests/integration/test_gdb_mi_smoke.py` 还会真实加载
+样例、命中 `main`、单步一条指令、读取寄存器/内存并确认 inferior 进程退出。
+不会用 mock 冒充调试成功。
 
 ### 7. 配置（`.env`）
 
@@ -127,13 +132,18 @@ pwndbg 可用时真实加载它；不会用 mock 冒充调试成功。
 |---|---|---|
 | `GDB_PATH` | `gdb` | GDB 可执行文件名或绝对路径；不存在时后端照常启动 |
 | `PWNDBG_INIT` | 空 | `gdbinit.py` 文件或其所在目录；空则自动检测 |
-| `API_HOST` | `127.0.0.1` | 后端绑定地址 |
+| `API_HOST` | `127.0.0.1` | 后端绑定地址；非 loopback 默认拒绝启动 |
 | `API_PORT` | `8000` | 后端绑定端口（非法值回退 8000） |
 | `ALLOWED_SAMPLE_DIR` | `<repo>/samples` | 只允许发现该目录之下的样例 |
+| `PWNVIZ_ALLOW_REMOTE` | `0` | 显式允许非 loopback 绑定（不推荐） |
+| `PWNVIZ_ALLOWED_HOSTS` | `127.0.0.1,localhost,testserver` | `Host` 头白名单 |
 
 可选调优项（`PWNVIZ_*`：pwndbg 开关、超时、缓存 TTL、CORS、栈窗口）见
 [.env.example](.env.example)。旧的 `PWNVIZ_GDB_BINARY` / `PWNVIZ_PWNDBG_PATH` /
 `PWNVIZ_SAMPLES_DIR` / `PWNVIZ_HOST` / `PWNVIZ_PORT` 仍作为兼容别名。
+
+安全模型与审计结论见 [docs/SECURITY.md](docs/SECURITY.md) 与
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#14-安全--架构-review-记录2026-11-03)。
 
 ---
 

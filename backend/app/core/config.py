@@ -15,12 +15,15 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from app.core.security import is_loopback_host
+
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = BACKEND_ROOT.parent
 
 DEFAULT_GDB_MIN_VERSION = (12, 1, 0)
 DEFAULT_API_HOST = "127.0.0.1"
 DEFAULT_API_PORT = 8000
+DEFAULT_ALLOWED_HOSTS = ("127.0.0.1", "localhost", "testserver")
 DEFAULT_ALLOWED_ORIGINS = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -109,6 +112,8 @@ class Settings:
     load_pwndbg: bool
     api_host: str
     api_port: int
+    allow_remote: bool
+    allowed_hosts: tuple[str, ...]
     probe_timeout_seconds: float
     pwndbg_probe_timeout_seconds: float
     capabilities_cache_seconds: float
@@ -131,6 +136,8 @@ class Settings:
             "load_pwndbg": self.load_pwndbg,
             "api_host": self.api_host,
             "api_port": self.api_port,
+            "allow_remote": self.allow_remote,
+            "allowed_hosts": list(self.allowed_hosts),
             "log_level": self.log_level,
         }
 
@@ -152,6 +159,12 @@ def get_settings() -> Settings:
         ("ALLOWED_SAMPLE_DIR", "PWNVIZ_SAMPLES_DIR"), REPO_ROOT / "samples"
     )
 
+    api_host = _env_str(("API_HOST", "PWNVIZ_HOST"), DEFAULT_API_HOST)
+    default_hosts = list(DEFAULT_ALLOWED_HOSTS)
+    if api_host not in {"0.0.0.0", "::", "[::]"} and not is_loopback_host(api_host):
+        if api_host not in default_hosts:
+            default_hosts.append(api_host)
+
     return Settings(
         backend_root=BACKEND_ROOT,
         repo_root=REPO_ROOT,
@@ -161,8 +174,12 @@ def get_settings() -> Settings:
         gdb_min_version=DEFAULT_GDB_MIN_VERSION,
         pwndbg_path=pwndbg_path,
         load_pwndbg=_env_bool(("PWNVIZ_LOAD_PWNDBG",), True),
-        api_host=_env_str(("API_HOST", "PWNVIZ_HOST"), DEFAULT_API_HOST),
+        api_host=api_host,
         api_port=_env_port(),
+        allow_remote=_env_bool(("PWNVIZ_ALLOW_REMOTE",), False),
+        allowed_hosts=_env_origins(
+            ("PWNVIZ_ALLOWED_HOSTS",), tuple(default_hosts)
+        ),
         probe_timeout_seconds=_env_float(("PWNVIZ_PROBE_TIMEOUT_SECONDS",), 10.0),
         pwndbg_probe_timeout_seconds=_env_float(
             ("PWNVIZ_PWNDBG_PROBE_TIMEOUT_SECONDS",), 45.0

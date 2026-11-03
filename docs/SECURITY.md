@@ -5,7 +5,8 @@
 PWNviz 第一版是**本机单用户教学工具**：
 
 - 只调试项目 `samples/` 下的、由本仓库脚本编译的可信 ELF；
-- 后端只监听 `127.0.0.1`；
+- 后端默认只监听 `127.0.0.1`；非 loopback 绑定需要显式
+  `PWNVIZ_ALLOW_REMOTE=1`，且没有认证；
 - 不提供 ELF 上传、任意路径加载或远程访问；
 - 不执行用户提交的 shell 命令。
 
@@ -13,15 +14,27 @@ PWNviz 第一版是**本机单用户教学工具**：
 
 - **无 shell 执行**：所有外部命令通过 `asyncio.create_subprocess_exec` 以参数数组
   启动，不拼接 shell 字符串（`app/core/proc.py`）；
-- **有界探测**：`gdb --version`、Python、MI3、pwndbg 加载都有超时，超时杀进程；
+- **有界探测 + 进程组清理**：`gdb --version`、Python、MI3、pwndbg 加载都有超时；
+  POSIX 下子进程以独立 session 启动，超时时 `os.killpg(SIGKILL)` 连同其子进程一起
+  清理，并做有界的管道 draining，避免 GDB 孙进程泄漏；
 - **路径来源受控**：pwndbg 路径来自 `PWNDBG_INIT`/环境变量/`~/.gdbinit` 解析，
   样例目录来自 `ALLOWED_SAMPLE_DIR`，API 不接受任意文件路径；
 - **样例 ID 白名单格式**：`^[a-z0-9][a-z0-9._-]{0,63}$`，拒绝 `../` 等穿越；
-- **样例根目录约束**：样例目录和 `demo.c` 解析后必须仍位于 `ALLOWED_SAMPLE_DIR`
-  之内，指向根目录外的符号链接会被忽略；
+- **样例根目录约束**：样例目录、`demo.c`、`README.md` 与二进制解析后必须仍位于
+  `ALLOWED_SAMPLE_DIR` 之内；指向根目录外的符号链接会被忽略（README 不读取，
+  二进制不登记）；
 - **不执行提交内容**：Phase 0 的 API 只做探测与读取，不运行样例、不接收上传文件；
 - **错误结构化**：探测失败返回可读 warning，不泄露堆栈给浏览器；
-- **CORS 仅放行本机 Vite 源**（默认 `localhost:5173` / `127.0.0.1:5173`）。
+- **仅本机绑定**：`python -m app` 在 `API_HOST` 非 loopback 时默认拒绝启动（退出码
+  2），必须显式设置 `PWNVIZ_ALLOW_REMOTE=1`；lifespan 对 CLI 启动方式给出 warning；
+- **Host 白名单**：`TrustedHostMiddleware` 拒绝非预期 `Host` 头（默认
+  `127.0.0.1`、`localhost`、`testserver`，可用 `PWNVIZ_ALLOWED_HOSTS` 扩展），
+  缓解 DNS rebinding；
+- **跨站请求拒绝**：带 `Sec-Fetch-Site: cross-site` 的浏览器请求返回 403，防止任意
+  网页通过简单 GET 触发 GDB 探测；
+- **CORS 收紧**：不使用 `allow_credentials`，方法与请求头均为白名单；
+- **真实 MI 集成测试**：`tests/integration/test_gdb_mi_smoke.py` 启动真实 GDB/MI3，
+  加载样例、命中 `main`、单步、读取寄存器/内存，并断言 inferior 进程在退出后消失。
 
 ## Phase 1 必须遵守
 

@@ -36,11 +36,12 @@
 
 | 模块 | 职责 | 现状 |
 |---|---|---|
-| `app/main.py` | FastAPI 实例、CORS、异常处理、lifespan 日志 | 已实现 |
+| `app/main.py` | FastAPI 实例、CORS/Host/跨站护栏、异常处理、lifespan 日志 | 已实现 |
 | `app/core/config.py` | 环境变量 / `.env` → 不可变 `Settings`（`GDB_PATH`、`PWNDBG_INIT`、`API_HOST`、`API_PORT`、`ALLOWED_SAMPLE_DIR` 及兼容别名） | 已实现 |
 | `app/__main__.py` | 读取 `API_HOST`/`API_PORT` 启动 uvicorn（`python -m app`） | 已实现 |
 | `app/core/proc.py` | 无 shell 的有界子进程执行（超时 kill） | 已实现 |
 | `app/core/errors.py` | 带稳定 `code` 的领域错误 → HTTP 错误体 | 已实现 |
+| `app/core/security.py` | loopback 判定与非 loopback 绑定拒绝 | 已实现 |
 | `app/debugger/environment.py` | 真实探测 GDB 版本、内嵌 Python、MI3、pwndbg 检测/加载 | 已实现 |
 | `app/samples/registry.py` | 扫描 `samples/*/demo.c`、读取 README、计算编译命令 | 已实现 |
 | `app/api/routes_health.py` | `/health`，不启动 GDB | 已实现 |
@@ -128,6 +129,24 @@ app/analysis/
 app/api/websocket.py    /api/v1/sessions/{id}/stream
 app/api/routes_sessions.py
 ```
+
+### 3.0 实测：`*stopped` 可能与命令响应同批到达
+
+2026-11-03 用 pygdbmi + 真实 GDB 12.1 对 `samples/stack-basic/demo` 实测发现：
+
+- `-exec-run` 的 `write()` 返回记录中同时包含 `^running`、`*running` 和 `*stopped`
+  （`reason="breakpoint-hit"`）；
+- 因此“命令返回后才可能收到 stopped”和“命令返回就代表已停止”两种假设都不成立。
+
+Phase 1 的 MI controller 必须：
+
+1. 为每条命令建立 future，按命令序号/token 关联 `^done` / `^error`；
+2. 异步记录（`*running`、`*stopped`、`=thread-group-exited`）单独分发，即使它比
+   命令响应先到，也要缓存并触发状态转换/快照；
+3. 用状态机判断“进程已停止”，不能只看命令返回值。
+
+该时序已由 `tests/integration/test_gdb_mi_smoke.py` 覆盖：先检查 `-exec-run` 的返回
+记录里是否已有 stopped，没有才轮询后续异步记录。
 
 ### 3.1 单次 Step 的真实时序
 

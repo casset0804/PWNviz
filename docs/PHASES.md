@@ -21,6 +21,8 @@ Phase 1 尚未开始（无任何 mock 调试数据）。
 | 0.10 | README / docs / 环境检查脚本 | 完成 | `README.md`、`scripts/check_environment.sh` |
 | 0.11 | 公开配置 `GDB_PATH`/`PWNDBG_INIT`/`API_HOST`/`API_PORT`/`ALLOWED_SAMPLE_DIR` | 完成 | `core/config.py`、`.env.example` |
 | 0.12 | 架构判定与 x86-64 门控（`platform.architecture`/`is_x86_64`） | 完成 | `debugger/environment.py` |
+| 0.13 | 本机安全护栏：绑定拒绝、Host 白名单、跨站拒绝、CORS 收紧、进程组清理 | 完成 | `core/security.py`、`main.py`、`core/proc.py` |
+| 0.14 | 真实 GDB/MI3 冒烟测试（load/break/run/stepi/memory/cleanup） | 完成 | `tests/integration/test_gdb_mi_smoke.py` |
 
 验收标准（Phase 0）：
 
@@ -29,8 +31,10 @@ Phase 1 尚未开始（无任何 mock 调试数据）。
 - [x] 前端能显示 GDB 版本、MI3 支持、pwndbg 状态；
 - [x] 缺少 GDB / pwndbg 时警告可读，不回退为假数据；
 - [x] 后端与前端可分别启动（`scripts/dev_backend.sh` / `npm run dev`）；
-- [x] pytest 在真实 WSL 环境中通过（50 passed）；
-- [x] `scripts/check_environment.sh` 本机 0 failure / 0 warning。
+- [x] pytest 在真实 WSL 环境中通过（75 passed，含真实 MI3 冒烟测试）；
+- [x] `scripts/check_environment.sh` 本机 0 failure / 0 warning；
+- [x] 非 loopback 绑定默认拒绝，跨站浏览器请求与非法 Host 被拒绝；
+- [x] 探测超时不会留下孙进程（进程组 kill 测试通过）。
 
 ## Phase 1：真实 GDB 单步闭环（最高优先级）
 

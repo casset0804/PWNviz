@@ -45,6 +45,8 @@ def make_settings(tmp_path: Path):
             load_pwndbg=True,
             api_host="127.0.0.1",
             api_port=8000,
+            allow_remote=False,
+            allowed_hosts=("127.0.0.1", "localhost", "testserver"),
             probe_timeout_seconds=5.0,
             pwndbg_probe_timeout_seconds=5.0,
             capabilities_cache_seconds=30.0,

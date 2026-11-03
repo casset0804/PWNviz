@@ -356,3 +356,89 @@ dev script port 8003 -> ok, uptime=4.935
 
 Phase 1 的真实 GDB 会话、快照与 WebSocket 均未开始；三类调试面板仍明确显示
 `no live session`，不包含任何伪造的寄存器或内存值。
+
+## 14. 安全 / 架构 Review 记录（2026-11-03）
+
+本轮对 Phase 0 代码做了 12 项审计，结论与修复见下（完整分级见提交说明）。
+
+### 14.1 真实 GDB/MI3 冒烟测试（不 mock）
+
+新增 `backend/tests/integration/test_gdb_mi_smoke.py`，真实执行：
+
+```text
+gdb --quiet --nx --interpreter=mi3
+-file-exec-and-symbols samples/stack-basic/demo
+-break-insert main
+-exec-run                    # 真实 inferior 启动并命中 main
+-data-evaluate-expression $rip
+-exec-step-instruction       # 真实单步一条机器指令
+-data-read-memory-bytes $rsp 8
+-gdb-exit
+```
+
+实测结果：
+
+```text
+tests/integration/test_gdb_mi_smoke.py::test_real_mi_break_run_step_memory_and_cleanup PASSED
+```
+
+并断言：`*stopped reason=breakpoint-hit`、单步后 RIP 改变、内存返回 16 位 hex、
+inferior PID 在 GDB 退出后消失。
+
+关键时序发现：`-exec-run` 的 `write()` 返回记录中**同时**包含 `^running`、
+`*running` 和 `*stopped`。因此 Phase 1 不能把“命令返回”当作“进程已停止”，
+也不能假设 stopped 一定在后续 read 中到达。测试会先检查初始响应，再轮询。
+
+### 14.2 进程组清理
+
+`run_command` 在 POSIX 下使用 `start_new_session=True`；超时后
+`os.killpg(pid, SIGKILL)` 杀死整个进程组，并做 2 秒有界 draining。
+新增测试让假 GDB 启动一个后台 `sleep 30` 孙进程，断言超时后该 PID 消失：
+
+```text
+tests/unit/test_proc.py::test_timeout_kills_grandchildren PASSED
+```
+
+### 14.3 本机安全护栏（实测）
+
+```text
+curl http://127.0.0.1:8000/health                                  -> 200
+curl -H "Host: evil.example" .../health                           -> 400 Invalid host header
+curl -H "Sec-Fetch-Site: cross-site" .../api/v1/samples           -> 403 cross_site_blocked
+GET http://127.0.0.1:5173/api/v1/capabilities（Vite proxy）        -> 200, ready=true
+```
+
+非 loopback 绑定默认拒绝：
+
+```bash
+API_HOST=0.0.0.0 python -m app
+error: Refusing to bind PWNviz to '0.0.0.0': this debugger spawns GDB and is
+local-only by design. ... set PWNVIZ_ALLOW_REMOTE=1 ...
+```
+
+CORS 不再使用 `allow_credentials`，方法/请求头改为白名单。
+
+### 14.4 样例根目录
+
+`demo.c`、`README.md` 和二进制均检查 `resolve()` 后是否位于样例根目录内；
+指向根目录外的符号链接不会被读取/登记。新增：
+
+```text
+tests/unit/test_samples_registry.py::test_readme_symlink_outside_root_is_not_read PASSED
+tests/unit/test_samples_registry.py::test_binary_symlink_outside_root_is_skipped PASSED
+```
+
+### 14.5 失败验证可重试
+
+修复了 `?verify_pwndbg=true` 失败结果被写入验证缓存的问题：失败不再缓存，
+下一次点击会真实重试。新增：
+`test_failed_pwndbg_verification_stays_retryable`。
+
+### 14.6 测试总量
+
+```text
+75 passed
+```
+
+其中真实 GDB 集成测试 2 类（capabilities 探测、MI3 load/break/run/step/memory），
+其余为真实文件系统/子进程/ASGI 测试；没有为了通过测试而删除真实集成测试或改成 mock。

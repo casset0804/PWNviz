@@ -10,17 +10,32 @@ Set ``PWNVIZ_RELOAD=1`` for uvicorn auto-reload during development.
 from __future__ import annotations
 
 import os
+import sys
 
 import uvicorn
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.core.security import bind_guard_error, is_loopback_host
 from app.main import app
 
 
 def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
+
+    refusal = bind_guard_error(settings)
+    if refusal is not None:
+        print(f"error: {refusal}", file=sys.stderr)
+        raise SystemExit(2)
+    if not is_loopback_host(settings.api_host):
+        print(
+            "warning: PWNVIZ_ALLOW_REMOTE is enabled and the backend will listen "
+            f"on {settings.api_host}; there is no authentication. Keep it on a "
+            "trusted network/container only.",
+            file=sys.stderr,
+        )
+
     reload_enabled = os.environ.get("PWNVIZ_RELOAD", "").strip().lower() in {
         "1",
         "true",

@@ -17,12 +17,17 @@ Base URL：`http://127.0.0.1:8000`（WSL 内 uvicorn）。
 
 | HTTP | `code` | 场景 |
 |---|---|---|
+| 400 | （Starlette）`Invalid host header` | `Host` 不在 `PWNVIZ_ALLOWED_HOSTS` 白名单 |
+| 403 | `cross_site_blocked` | 浏览器跨站请求（`Sec-Fetch-Site: cross-site`） |
 | 404 | `sample_not_found` | 样例不存在 |
 | 422 | `invalid_request` | 请求参数校验失败 |
 | 503 | `debugger_unavailable` | GDB 不可用（Phase 1 使用） |
 | 503 | `capability_probe_failed` | 探测无有效结果 |
 
 地址与 64-bit 值一律十六进制字符串（Phase 1 快照协议），绝不使用 JS Number。
+
+本机安全护栏：`API_HOST` 非 loopback 时 `python -m app` 默认拒绝启动；CORS 不启用
+credentials；跨站浏览器请求在到达路由前被拒绝；`Host` 头受白名单约束。
 
 ---
 
@@ -134,7 +139,8 @@ Base URL：`http://127.0.0.1:8000`（WSL 内 uvicorn）。
 
 - 默认缓存 30 秒（`PWNVIZ_CAPABILITIES_CACHE_SECONDS`）；
 - 一旦 pwndbg 验证成功，后续 quick 请求也直接返回已验证结果；
-- 验证失败不会被缓存，便于重试。
+- **失败验证不缓存**：`load_failed` 不写入缓存，验证按钮可立即重试
+  （`tests/integration/test_api.py::test_failed_pwndbg_verification_stays_retryable`）。
 
 ### 配置来源
 
@@ -144,6 +150,8 @@ Base URL：`http://127.0.0.1:8000`（WSL 内 uvicorn）。
 | `PWNDBG_INIT` | `pwndbg.path` / `pwndbg.gdbinit` 的优先候选 |
 | `ALLOWED_SAMPLE_DIR` | `samples.directory` 与样例扫描根目录 |
 | `API_HOST` / `API_PORT` | 后端监听地址（`python -m app`） |
+| `PWNVIZ_ALLOW_REMOTE` | 允许非 loopback 绑定（默认拒绝） |
+| `PWNVIZ_ALLOWED_HOSTS` | `Host` 头白名单（默认 `127.0.0.1,localhost,testserver`） |
 
 ### GDB 缺失时
 

@@ -191,13 +191,17 @@ async def get_capabilities(
                 return quick_cached[1]
 
         result = await _safe_build(settings, verify_pwndbg=verify_pwndbg)
+        expiry = time.monotonic() + ttl
 
-        if verify_pwndbg and result.pwndbg.verified:
-            # A verified report is more informative; serve it for quick calls too.
-            _cache[_VERIFIED] = (now + ttl, result)
-            _cache[_QUICK] = (now + ttl, result)
+        if verify_pwndbg:
+            # Only successful verification is cached. A failed load must stay
+            # retryable so the UI's "verify pwndbg load" button is not stuck for
+            # the whole TTL after a transient failure.
+            if result.pwndbg.verified:
+                _cache[_VERIFIED] = (expiry, result)
+                _cache[_QUICK] = (expiry, result)
         else:
-            _cache[_QUICK if not verify_pwndbg else _VERIFIED] = (now + ttl, result)
+            _cache[_QUICK] = (expiry, result)
         return result
 
 

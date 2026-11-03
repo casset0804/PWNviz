@@ -13,7 +13,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.api.routes_capabilities import reset_capability_cache
 from app.core.config import get_settings
-from app.debugger.environment import pwndbg_candidates
+from app.debugger.environment import PwndbgProbe, pwndbg_candidates
 from app.main import app
 
 pytestmark = pytest.mark.integration
@@ -24,6 +24,30 @@ async def client():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as http:
         yield http
+
+
+async def test_invalid_host_header_is_rejected(client: AsyncClient) -> None:
+    response = await client.get("/health", headers={"host": "evil.example"})
+
+    assert response.status_code == 400
+    assert "Invalid host header" in response.text
+
+
+async def test_cross_site_browser_request_is_rejected(client: AsyncClient) -> None:
+    response = await client.get(
+        "/api/v1/samples", headers={"sec-fetch-site": "cross-site"}
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "cross_site_blocked"
+
+
+async def test_cross_site_check_allows_same_origin_requests(client: AsyncClient) -> None:
+    response = await client.get(
+        "/api/v1/samples", headers={"sec-fetch-site": "same-origin"}
+    )
+
+    assert response.status_code == 200
 
 
 async def test_health_reports_configured_binary(client: AsyncClient) -> None:
@@ -138,3 +162,31 @@ async def test_pwndbg_verification_is_real(client: AsyncClient) -> None:
     assert pwndbg["verified"] is (pwndbg["status"] == "verified")
     if pwndbg["verified"]:
         assert pwndbg["gdbinit"].endswith("gdbinit.py")
+
+
+async def test_failed_pwndbg_verification_stays_retryable(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[bool] = []
+
+    async def fake_probe(_settings, *, verify: bool = False) -> PwndbgProbe:
+        calls.append(verify)
+        return PwndbgProbe(
+            status="load_failed",
+            path=None,
+            gdbinit=None,
+            verified=False,
+            version=None,
+            detail="simulated transient pwndbg failure",
+            enabled=True,
+        )
+
+    monkeypatch.setattr("app.api.routes_capabilities.probe_pwndbg", fake_probe)
+    reset_capability_cache()
+
+    first = await client.get("/api/v1/capabilities?verify_pwndbg=true")
+    second = await client.get("/api/v1/capabilities?verify_pwndbg=true")
+
+    assert first.status_code == second.status_code == 200
+    assert first.json()["pwndbg"]["status"] == "load_failed"
+    assert calls == [True, True], "failed verification must not be cached"

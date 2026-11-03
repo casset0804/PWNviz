@@ -118,3 +118,34 @@ def test_discover_skips_symlink_escape(tmp_path: Path) -> None:
         pytest.skip(f"cannot create symlink: {exc}")
 
     assert discover_samples(samples) == []
+
+
+def test_readme_symlink_outside_root_is_not_read(tmp_path: Path) -> None:
+    samples = tmp_path / "samples"
+    samples.mkdir()
+    directory = _make_sample(samples, "stack-basic")
+    secret = tmp_path / "secret.md"
+    secret.write_text("# leaked\n\nthis must not be returned\n", encoding="utf-8")
+    try:
+        (directory / "README.md").symlink_to(secret)
+    except OSError as exc:
+        pytest.skip(f"cannot create symlink: {exc}")
+
+    [record] = discover_samples(samples)
+
+    assert record.title == "stack-basic"
+    assert record.description is None
+
+
+def test_binary_symlink_outside_root_is_skipped(tmp_path: Path) -> None:
+    samples = tmp_path / "samples"
+    samples.mkdir()
+    directory = _make_sample(samples, "stack-basic")
+    outside_binary = tmp_path / "outside-demo"
+    outside_binary.write_bytes(b"\x7fELF" + b"\x00" * 60)
+    try:
+        (directory / "demo").symlink_to(outside_binary)
+    except OSError as exc:
+        pytest.skip(f"cannot create symlink: {exc}")
+
+    assert discover_samples(samples) == []

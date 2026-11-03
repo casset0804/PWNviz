@@ -58,12 +58,18 @@ class SampleRecord:
         ]
 
 
-def _read_readme(directory: Path) -> tuple[str | None, str | None]:
-    """Return the first markdown heading and first paragraph of README.md."""
+def _read_readme(directory: Path, root: Path) -> tuple[str | None, str | None]:
+    """Return the first markdown heading and first paragraph of README.md.
+
+    The README must resolve inside the allowed sample root; a symlink pointing
+    elsewhere is ignored instead of being read.
+    """
     path = directory / README_NAME
     if not path.is_file():
         return None, None
     try:
+        if not path.resolve().is_relative_to(root):
+            return None, None
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return None, None
@@ -130,7 +136,16 @@ def discover_samples(samples_dir: Path) -> list[SampleRecord]:
                 continue
         except OSError:
             continue
-        title, description = _read_readme(child)
+        binary = child / BINARY_NAME
+        if binary.exists():
+            try:
+                if not binary.resolve().is_relative_to(root):
+                    # Never advertise a binary outside the sample root; Phase 1
+                    # would otherwise be tempted to execute it.
+                    continue
+            except OSError:
+                continue
+        title, description = _read_readme(child, root)
         records.append(
             SampleRecord(
                 id=child.name,
@@ -138,7 +153,7 @@ def discover_samples(samples_dir: Path) -> list[SampleRecord]:
                 description=description,
                 directory=child,
                 source_file=source,
-                binary_file=child / BINARY_NAME,
+                binary_file=binary,
             )
         )
     return records
