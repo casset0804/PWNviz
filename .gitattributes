@@ -1,0 +1,17 @@
+# Normalize text files to LF so shell scripts keep working from WSL.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+
+*.sh text eol=lf
+*.py text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.c text eol=lf
+*.toml text eol=lf

@@ -1,0 +1,1 @@
+"""Teaching sample catalog."""
