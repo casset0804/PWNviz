@@ -31,7 +31,7 @@
 - [x] 前端能显示 GDB 版本、MI3 支持、pwndbg 状态；
 - [x] 缺少 GDB / pwndbg 时警告可读，不回退为假数据；
 - [x] 后端与前端可分别启动（`scripts/dev_backend.sh` / `npm run dev`）；
-- [x] pytest 在真实 WSL 环境中通过（当前 110 passed，含真实 MI3 冒烟与会话测试）；
+- [x] pytest 在真实 WSL 环境中通过（当前 111 passed，含真实 MI3 冒烟与会话测试）；
 - [x] `scripts/check_environment.sh` 本机 0 failure / 0 warning；
 - [x] 非 loopback 绑定默认拒绝，跨站浏览器请求与非法 Host 被拒绝；
 - [x] 探测超时不会留下孙进程（进程组 kill 测试通过）。

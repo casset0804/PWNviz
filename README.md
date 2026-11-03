@@ -59,10 +59,10 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
 - 本机安全护栏：非 loopback 绑定默认拒绝、HTTP/WS 非 loopback 客户端中间件、
   `Host` 白名单、跨站浏览器请求拒绝、CORS 收紧、子进程组超时清理；
 - 生命周期清理：DELETE/取消/退出/reader 失败均回收 GDB，WebSocket 队列有界；
-- 单元测试与真实环境集成测试（pytest 110 passed，含真实 GDB 会话与 MI 控制器测试）；
+- 单元测试与真实环境集成测试（pytest 111 passed，含真实 GDB 会话与 MI 控制器测试）；
 - CDP E2E：`scripts/ui_smoke.mjs` 真实跑通
   main → StepI → Step Into add_numbers → RSP 变化 → Finish → Continue 退出 →
-  Restart，页面不刷新；前端单测 23 passed；
+  Restart，页面不刷新；前端单测 24 passed；
 - 环境检查脚本在本机 0 failure / 0 warning。
 
 ![Phase 3 工作台（真实 GDB 会话）](docs/assets/workbench-phase2.png)

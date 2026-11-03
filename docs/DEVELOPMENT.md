@@ -502,7 +502,7 @@ changed_bytes = [{address: 0x7fffffffe274, before: 00, after: 0a}]
 ### 15.4 测试结果
 
 ```text
-110 passed in 49.64s
+111 passed in 53.04s
 ```
 
 核心真实集成测试：
@@ -585,7 +585,7 @@ tests/unit/test_subscriber_backpressure.py
 - 新增失败路径测试：
   `tests/unit/test_mi_reader_failure.py`、`tests/unit/test_session_failure.py`，
   以及 `test_continue_to_exit_and_cleanup` 中“退出后自动释放 GDB”断言。
-- 真实 GDB 集成测试未删除、未改为 mock；当前 110 passed。
+- 真实 GDB 集成测试未删除、未改为 mock；当前 111 passed。
 
 ## 16. Phase 2 前端可视化实测（2026-11-03）
 
@@ -648,16 +648,16 @@ node scripts/ui_smoke.mjs
 
 ```text
 npm test
-✓ src/lib/explain.test.ts (10 tests)
+✓ src/lib/explain.test.ts (11 tests)
 ✓ src/lib/address.test.ts (6 tests)
 ✓ src/lib/snapshot.test.ts (5 tests)
 ✓ src/stores/debugStore.test.ts (2 tests)
 Test Files 4 passed (4)
-Tests 23 passed (23)
+Tests 24 passed (24)
 
 tsc --noEmit && vite build
 ✓ 40 modules transformed
-dist/assets/index-*.js 287.23 kB
+dist/assets/index-*.js 287.55 kB
 ```
 
 测试覆盖：64-bit BigInt 精确性、地址格式化/比较/行内 offset、RSP/RBP marker、
@@ -707,8 +707,8 @@ DELETE 失败保留 session、push/pop/mov/sub rsp/add rsp/call/ret/leave/nop �
 
 ### 17.3 验证
 
-- 后端：`110 passed, 1 warning`（真实 GDB 集成测试未删除、未 mock 成功路径）；
-- 前端：`23 passed`，`tsc --noEmit && vite build` 成功；
+- 后端：`111 passed, 1 warning`（真实 GDB 集成测试未删除、未 mock 成功路径）；
+- 前端：`24 passed`，`tsc --noEmit && vite build` 成功；
 - 真实 UI E2E 仍通过 Run → StepI → changed cell → RSP scroll → Terminate
   （见 16.2；本轮后端中间件未改变 loopback 访问路径）。
 
@@ -782,8 +782,46 @@ Debug Log 的 GDB/MI 输出、Explanation 面板同时验证。
 
 ### 18.4 测试
 
-- 后端：`110 passed, 1 warning`（真实 GDB 集成测试保留；WS 测试新增
+- 后端：`111 passed, 1 warning`（真实 GDB 集成测试保留；WS 测试新增
   `breakpoints.updated` 与 `debugger.output` 断言）；
-- 前端：`23 passed`；`tsc --noEmit && vite build` 成功；
+- 前端：`24 passed`；`tsc --noEmit && vite build` 成功；
 - 说明：Step Into 一次可能执行多条机器指令，因此 Explanation 在无法把
   before/after 归因于单条指令时只显示“已执行，请观察状态变化”，不猜测。
+
+## 19. 第三轮系统/安全 Review（2026-11-03）
+
+### 19.1 结论
+
+- **Critical：无**（默认 loopback、本机单用户、仅可信样例）。
+- **High：3 项，已修复**：
+  1. WebSocket 丢事件/重连后，`previousSnapshot` 与 `diff.previous_snapshot_id`
+     可能不连续；Explanation 仍可能把多步差异归因给单条指令；
+  2. 晚到的 snapshot/REST 响应可能把终态 EXITED/ERROR 覆盖回 STOPPED；
+  3. GDB 目标输出通过无界 `_events` 队列排队，chatty inferior 可造成内存压力。
+- **Medium**：无 session TTL；后端 SIGKILL 无 PDEATHSIG；无用户认证
+  （session ID 即 bearer，知道 ID 即可访问对应 WS）；`PWNVIZ_ALLOW_REMOTE=1`
+  时无认证；WS 无 heartbeat；Debug Log 可能包含本机路径/目标输出；
+  无 CSP/Cache-Control；breakpoint 仅初始事件，无增删 API。
+- **Low**：`testserver` Host、`/docs` 本地暴露、依赖 deprecation warning、
+  E2E 需要手动启动 Edge CDP。
+
+### 19.2 修复
+
+- `explain.ts` 现在要求
+  `current.diff.previous_snapshot_id === previous.snapshot_id`；不连续时只展示
+  “快照之间有缺口，无法归因于单条指令”，不套用规则；
+- `applySnapshot` / `applyActionResponse` / session info 更新使用
+  `reconcileState`，终态不会被晚到的 RUNNING/STOPPED 覆盖；`applySnapshot` 在
+  终态下保留 ERROR 信息；
+- `MIController._queue_output` 将诊断事件限制为最多 512 条；队列满时丢弃输出
+  诊断，但 stop/exit/error 控制事件不受影响；
+- 新增测试：`explain.test.ts` 快照缺口用例、`test_mi_reader_failure.py`
+  输出队列上限用例。
+
+### 19.3 验证
+
+- 后端：`111 passed, 1 warning`（真实 GDB 集成测试保留）；
+- 前端：`24 passed`；`tsc --noEmit && vite build` 成功；
+- 完整 UI E2E 仍通过（默认 `:5173` / `:8000`）：main → StepI → Step Into →
+  RSP `e270→e260` → Finish → RSP `e270` → Continue **Exited** → Restart；
+  Breakpoint、Debug Log、stale/duplicate 处理均验证。

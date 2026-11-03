@@ -23,6 +23,7 @@ from app.core.logging import get_logger
 from app.debugger.gdb_process import GdbProcess, GdbProcessError
 
 logger = get_logger("pwnviz.mi")
+MAX_QUEUED_OUTPUT_EVENTS = 512
 
 
 class MIError(RuntimeError):
@@ -220,6 +221,14 @@ class MIController:
     def _command_timeout(self) -> float:
         return self.settings.gdb_command_timeout_seconds
 
+    def _queue_output(self, stream: str, text: str) -> None:
+        """Queue diagnostics without letting a chatty inferior grow memory forever."""
+        if self._events.qsize() >= MAX_QUEUED_OUTPUT_EVENTS:
+            return
+        self._events.put_nowait(
+            {"type": "output", "stream": stream, "text": text}
+        )
+
     async def execute(
         self,
         command: str,
@@ -258,13 +267,7 @@ class MIController:
             detail = payload.get("msg") or payload.get("message") or "GDB error"
             self.last_command_error = str(detail)
             raise MICommandError(command, str(detail))
-        self._events.put_nowait(
-            {
-                "type": "output",
-                "stream": "mi",
-                "text": f"{command} → {message}",
-            }
-        )
+        self._queue_output("mi", f"{command} → {message}")
         return record
 
     async def wait_for_stop(
@@ -361,13 +364,7 @@ class MIController:
             if isinstance(text, str) and text:
                 clean = text.rstrip("\n")
                 self._recent_output.append(clean)
-                self._events.put_nowait(
-                    {
-                        "type": "output",
-                        "stream": record_type,
-                        "text": clean,
-                    }
-                )
+                self._queue_output(record_type, clean)
             return
 
         # Unknown record types are retained for diagnostics, never interpreted.

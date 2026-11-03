@@ -476,9 +476,10 @@ function applyActionResponse(response: {
   const current = useDebugStore.getState();
   if (!current.session || current.session.session_id !== response.session_id) return;
   const nextState = normalizeState(response.state);
+  const effectiveState = reconcileState(current.debuggerState, nextState);
   useDebugStore.setState({
-    debuggerState: reconcileState(current.debuggerState, nextState),
-    session: { ...current.session, state: nextState },
+    debuggerState: effectiveState,
+    session: { ...current.session, state: effectiveState },
   });
   if (response.snapshot) {
     applySnapshot(response.snapshot);
@@ -492,16 +493,17 @@ function applySnapshot(snapshot: Snapshot): void {
     return;
   }
   const history = [...current.history, snapshot].slice(-200);
+  const effectiveState = reconcileState(current.debuggerState, "STOPPED");
   useDebugStore.setState({
     snapshot,
     previousSnapshot: current.snapshot,
     history,
-    debuggerState: "STOPPED",
-    error: null,
+    debuggerState: effectiveState,
+    error: effectiveState === "STOPPED" ? null : current.error,
     session: current.session
       ? {
           ...current.session,
-          state: "STOPPED",
+          state: effectiveState,
           snapshot_count: history.length,
           stop_reason: snapshot.stop_reason,
         }

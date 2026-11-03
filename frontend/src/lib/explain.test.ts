@@ -271,6 +271,26 @@ describe("explainStep", () => {
     expect(mov.rule).toBe("mov");
   });
 
+  it("refuses to attribute a rule when an intermediate snapshot is missing", () => {
+    const previous = snapshot(
+      2,
+      { rip: "0x0000000000401158", rsp: "0x00007fffffffe280", rbp: "0x00007fffffffe280" },
+      instruction("0x0000000000401158", "push rbp", "55"),
+      [],
+    );
+    const current = snapshot(
+      4,
+      { rip: "0x0000000000401160", rsp: "0x00007fffffffe270", rbp: "0x00007fffffffe280" },
+      instruction("0x0000000000401160", "mov DWORD PTR [rbp-0xc],0xa", "c745f40a000000"),
+      [],
+      ["rip", "rsp"],
+    );
+
+    const explanation = explainStep(previous, current, "step_instruction");
+    expect(explanation.matched).toBe(false);
+    expect(explanation.headline).toContain("缺口");
+  });
+
   it("does not guess for unknown instructions", () => {
     const previous = snapshot(
       1,

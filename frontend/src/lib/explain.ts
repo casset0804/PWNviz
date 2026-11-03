@@ -110,6 +110,20 @@ export function explainStep(
     return generic("等待单步执行", ["执行一条指令后，这里会给出基于 before/after 快照的教学解释。"]);
   }
 
+  // A slow WebSocket subscriber can miss intermediate events. Never attribute a
+  // multi-snapshot delta to the last instruction in that case.
+  if (current.diff.previous_snapshot_id !== previous.snapshot_id) {
+    return generic(
+      "快照之间有缺口，无法归因于单条指令",
+      [
+        "当前快照的 previous_snapshot_id 与本地保存的上一张快照不一致。",
+        "只展示实测差异；等待连续快照后再解释具体指令。",
+      ],
+      previous,
+      current,
+    );
+  }
+
   const instruction = previous.instruction;
   const mnemonic = instruction?.mnemonic?.toLowerCase() ?? null;
   const operands = instruction?.operands ?? "";

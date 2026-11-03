@@ -9,7 +9,12 @@ import pytest
 
 from app.core.config import get_settings
 from app.debugger.gdb_process import GdbProcessError
-from app.debugger.mi_controller import Epochs, MIController, MIError
+from app.debugger.mi_controller import (
+    Epochs,
+    MAX_QUEUED_OUTPUT_EVENTS,
+    MIController,
+    MIError,
+)
 
 
 class FakeGdbProcess:
@@ -57,6 +62,16 @@ class FakeGdbProcess:
     def close(self, *, timeout: float = 3.0) -> None:
         self.closed = True
         self.alive = False
+
+
+def test_queued_output_is_bounded() -> None:
+    controller = MIController(
+        get_settings(), gdb_process=FakeGdbProcess()  # type: ignore[arg-type]
+    )
+    for index in range(MAX_QUEUED_OUTPUT_EVENTS * 2):
+        controller._queue_output("output", str(index))
+
+    assert controller._events.qsize() == MAX_QUEUED_OUTPUT_EVENTS
 
 
 async def test_reader_failure_marks_controller_fatal_and_wakes_waiters() -> None:
