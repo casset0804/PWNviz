@@ -66,6 +66,8 @@ Base URL：`http://127.0.0.1:8000`（WSL 内 uvicorn）。
     "system": "Linux",
     "release": "6.6.87.2-microsoft-standard-WSL2",
     "machine": "x86_64",
+    "architecture": "x86-64",
+    "is_x86_64": true,
     "hostname": "localhost"
   },
   "python": {
@@ -133,6 +135,47 @@ Base URL：`http://127.0.0.1:8000`（WSL 内 uvicorn）。
 - 默认缓存 30 秒（`PWNVIZ_CAPABILITIES_CACHE_SECONDS`）；
 - 一旦 pwndbg 验证成功，后续 quick 请求也直接返回已验证结果；
 - 验证失败不会被缓存，便于重试。
+
+### 配置来源
+
+| 环境变量 | 影响字段 |
+|---|---|
+| `GDB_PATH` | `gdb.*` 探测使用的可执行文件 |
+| `PWNDBG_INIT` | `pwndbg.path` / `pwndbg.gdbinit` 的优先候选 |
+| `ALLOWED_SAMPLE_DIR` | `samples.directory` 与样例扫描根目录 |
+| `API_HOST` / `API_PORT` | 后端监听地址（`python -m app`） |
+
+### GDB 缺失时
+
+进程照常启动，`/health` 仍为 200；`/capabilities` 返回 200 但降级：
+
+```json
+{
+  "ready": false,
+  "gdb": {
+    "available": false,
+    "version": null,
+    "supports_mi3": false,
+    "python": { "available": false, "version": null, "error": "..." },
+    "error": "GDB binary '/nonexistent/pwnviz-gdb' not found or not executable: ... or set GDB_PATH."
+  },
+  "warnings": ["GDB binary '/nonexistent/pwnviz-gdb' not found or not executable: ..."]
+}
+```
+
+### 探测内部异常
+
+若探测代码抛出未预期异常，接口返回 503，而不是裸 500：
+
+```json
+{
+  "error": {
+    "code": "capability_probe_failed",
+    "message": "Capability probe failed unexpectedly.",
+    "detail": { "error": "RuntimeError: ..." }
+  }
+}
+```
 
 ---
 

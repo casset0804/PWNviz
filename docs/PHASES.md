@@ -19,15 +19,17 @@ Phase 1 尚未开始（无任何 mock 调试数据）。
 | 0.8 | 环境面板展示真实探测结果 | 完成 | `EnvironmentPanel.tsx` |
 | 0.9 | 单元 + 真实环境集成测试 | 完成 | `backend/tests/` |
 | 0.10 | README / docs / 环境检查脚本 | 完成 | `README.md`、`scripts/check_environment.sh` |
+| 0.11 | 公开配置 `GDB_PATH`/`PWNDBG_INIT`/`API_HOST`/`API_PORT`/`ALLOWED_SAMPLE_DIR` | 完成 | `core/config.py`、`.env.example` |
+| 0.12 | 架构判定与 x86-64 门控（`platform.architecture`/`is_x86_64`） | 完成 | `debugger/environment.py` |
 
 验收标准（Phase 0）：
 
 - [x] 未装 GDB 的机器上，`/health` 仍 200，`/capabilities` 返回结构化错误而非 500
-  （集成测试中把 `PWNVIZ_GDB_BINARY` 指向不存在的程序验证）；
+  （集成测试中把 `GDB_PATH` 指向不存在的程序验证）；
 - [x] 前端能显示 GDB 版本、MI3 支持、pwndbg 状态；
 - [x] 缺少 GDB / pwndbg 时警告可读，不回退为假数据；
 - [x] 后端与前端可分别启动（`scripts/dev_backend.sh` / `npm run dev`）；
-- [x] pytest 在真实 WSL 环境中通过（31 passed）；
+- [x] pytest 在真实 WSL 环境中通过（50 passed）；
 - [x] `scripts/check_environment.sh` 本机 0 failure / 0 warning。
 
 ## Phase 1：真实 GDB 单步闭环（最高优先级）

@@ -73,7 +73,7 @@ export function BottomDock({
 }: BottomDockProps) {
   return (
     <section
-      className="flex h-[18rem] shrink-0 flex-col border-t border-[#1e2635] bg-[#0d1117]"
+      className="flex h-[20rem] shrink-0 flex-col border-t border-[#1e2635] bg-[#0d1117]"
       aria-label="Inspector dock"
     >
       <div className="flex shrink-0 items-center gap-1 border-b border-[#1e2635] px-2 py-1.5">

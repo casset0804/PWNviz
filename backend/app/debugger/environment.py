@@ -8,6 +8,7 @@ probe cannot run, the result says so explicitly instead of assuming success.
 from __future__ import annotations
 
 import os
+import platform
 import re
 import shutil
 from dataclasses import dataclass
@@ -21,6 +22,10 @@ GDB_PYTHON_MARKER = "PWNVIZ_GDBPYTHON="
 PWNDBG_MARKER_RE = re.compile(r"PWNVIZ_PWNDBG_OK(?:\s+version=(\S+))?")
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
+X86_64_MACHINE_ALIASES = frozenset({"x86_64", "amd64", "x64"})
+
+# Optional pwndbg locations to *search*, never assumptions about the host. The
+# real path should come from PWNDBG_INIT; these keep detection convenient.
 PWNDBG_COMMON_DIRS = (
     "/opt/pwndbg",
     "/usr/share/pwndbg",
@@ -68,6 +73,25 @@ def version_meets_minimum(version: str | None, minimum: tuple[int, int, int]) ->
     padded_found = found + (0,) * (width - len(found))
     padded_min = tuple(minimum) + (0,) * (width - len(minimum))
     return padded_found >= padded_min
+
+
+@dataclass(frozen=True)
+class ArchitectureProbe:
+    """Host/target architecture facts used to gate the x86-64 MVP."""
+
+    machine: str
+    display: str
+    is_x86_64: bool
+
+
+def detect_architecture(machine: str | None = None) -> ArchitectureProbe:
+    """Classify the current machine name without assuming it is x86-64."""
+    raw = (machine if machine is not None else platform.machine()) or ""
+    normalized = raw.strip()
+    lowered = normalized.lower()
+    is_x86_64 = lowered in X86_64_MACHINE_ALIASES
+    display = "x86-64" if is_x86_64 else (normalized or "unknown")
+    return ArchitectureProbe(machine=normalized, display=display, is_x86_64=is_x86_64)
 
 
 @dataclass(frozen=True)
@@ -188,7 +212,7 @@ async def probe_gdb(settings: Settings) -> GdbProbe:
             error=(
                 f"GDB binary {settings.gdb_binary!r} not found or not executable: "
                 f"{result.spawn_error}. Install GDB (e.g. `sudo apt install gdb`) "
-                "or set PWNVIZ_GDB_BINARY."
+                "or set GDB_PATH."
             ),
             duration_ms=result.duration_ms,
         )
@@ -288,7 +312,7 @@ def pwndbg_candidates(settings: Settings, home: Path | None = None) -> list[Path
 
     if settings.pwndbg_path:
         raw_candidates.append(settings.pwndbg_path)
-    for env_name in ("PWNVIZ_PWNDBG_PATH", "PWNDBG_GDB_PATH"):
+    for env_name in ("PWNDBG_INIT", "PWNVIZ_PWNDBG_PATH", "PWNDBG_GDB_PATH"):
         value = os.environ.get(env_name)
         if value:
             raw_candidates.append(Path(os.path.expandvars(value)))
@@ -393,7 +417,7 @@ async def probe_pwndbg(settings: Settings, *, verify: bool = False) -> PwndbgPro
             verified=False,
             version=None,
             detail=(
-                "No pwndbg gdbinit.py found via PWNVIZ_PWNDBG_PATH, PWNDBG_GDB_PATH, "
+                "No pwndbg gdbinit.py found via PWNDBG_INIT, PWNDBG_GDB_PATH, "
                 "~/.gdbinit or common install directories. Native GDB is used."
             ),
             enabled=settings.load_pwndbg,

@@ -14,9 +14,12 @@ PWNviz 第一版是**本机单用户教学工具**：
 - **无 shell 执行**：所有外部命令通过 `asyncio.create_subprocess_exec` 以参数数组
   启动，不拼接 shell 字符串（`app/core/proc.py`）；
 - **有界探测**：`gdb --version`、Python、MI3、pwndbg 加载都有超时，超时杀进程；
-- **路径来源受控**：pwndbg 路径来自配置/环境变量/`~/.gdbinit` 解析，样例目录来自
-  `PWNVIZ_SAMPLES_DIR`，API 不接受任意文件路径；
+- **路径来源受控**：pwndbg 路径来自 `PWNDBG_INIT`/环境变量/`~/.gdbinit` 解析，
+  样例目录来自 `ALLOWED_SAMPLE_DIR`，API 不接受任意文件路径；
 - **样例 ID 白名单格式**：`^[a-z0-9][a-z0-9._-]{0,63}$`，拒绝 `../` 等穿越；
+- **样例根目录约束**：样例目录和 `demo.c` 解析后必须仍位于 `ALLOWED_SAMPLE_DIR`
+  之内，指向根目录外的符号链接会被忽略；
+- **不执行提交内容**：Phase 0 的 API 只做探测与读取，不运行样例、不接收上传文件；
 - **错误结构化**：探测失败返回可读 warning，不泄露堆栈给浏览器；
 - **CORS 仅放行本机 Vite 源**（默认 `localhost:5173` / `127.0.0.1:5173`）。
 

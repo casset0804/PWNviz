@@ -37,13 +37,14 @@
 | 模块 | 职责 | 现状 |
 |---|---|---|
 | `app/main.py` | FastAPI 实例、CORS、异常处理、lifespan 日志 | 已实现 |
-| `app/core/config.py` | 环境变量 / `.env` → 不可变 `Settings` | 已实现 |
+| `app/core/config.py` | 环境变量 / `.env` → 不可变 `Settings`（`GDB_PATH`、`PWNDBG_INIT`、`API_HOST`、`API_PORT`、`ALLOWED_SAMPLE_DIR` 及兼容别名） | 已实现 |
+| `app/__main__.py` | 读取 `API_HOST`/`API_PORT` 启动 uvicorn（`python -m app`） | 已实现 |
 | `app/core/proc.py` | 无 shell 的有界子进程执行（超时 kill） | 已实现 |
 | `app/core/errors.py` | 带稳定 `code` 的领域错误 → HTTP 错误体 | 已实现 |
 | `app/debugger/environment.py` | 真实探测 GDB 版本、内嵌 Python、MI3、pwndbg 检测/加载 | 已实现 |
 | `app/samples/registry.py` | 扫描 `samples/*/demo.c`、读取 README、计算编译命令 | 已实现 |
 | `app/api/routes_health.py` | `/health`，不启动 GDB | 已实现 |
-| `app/api/routes_capabilities.py` | 聚合探测结果、短 TTL 缓存、按需 pwndbg 验证 | 已实现 |
+| `app/api/routes_capabilities.py` | 聚合探测结果、架构判定、短 TTL 缓存、按需 pwndbg 验证、异常降级 | 已实现 |
 | `app/api/routes_samples.py` | 样例列表与单样例查询 | 已实现 |
 | `app/schemas/*` | Pydantic v2 响应模型 | 已实现 |
 
@@ -52,12 +53,29 @@
 ```text
 gdb --version
 gdb --batch --nx --quiet -ex "python import sys; print('PWNVIZ_GDBPYTHON=' + ...)"
-gdb --batch --nx --quiet --interpreter=mi3 -ex "-gdb-version"
+gdb --batch --nx --quiet --interpreter=mi3 -ex "python print('PWNVIZ_MI3_OK')"
 gdb --batch --nx --quiet -ex "source <pwndbg>/gdbinit.py" -ex "python <marker>"
 ```
 
+注意：GDB 12.1 对未知 `--interpreter` 也返回 0，因此 MI3 判定依赖标记输出并
+拒绝 `unrecognized`，而不是只看退出码。
+
 任何一步失败都只会产生 `available=false` / `status=load_failed` 与可读的
 `warnings`，不会让健康检查或应用启动崩溃。
+
+### 2.3 能力判定（ready）
+
+```text
+ready = gdb.available
+        and gdb.version >= 12.1
+        and gdb.supports_mi3
+        and gdb.python.available
+        and platform.is_x86_64
+```
+
+`platform.architecture` 由 `uname -m` 归一化：`x86_64`/`AMD64` → `x86-64`，
+其他值原样返回且 `is_x86_64=false`（MVP 明确只支持 x86-64），此时 `ready=false`
+并追加 warning。缺少 GDB 时同样只是 `ready=false`，HTTP 仍是 200。
 
 ### 2.2 前端
 

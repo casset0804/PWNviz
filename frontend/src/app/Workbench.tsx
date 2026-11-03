@@ -57,7 +57,8 @@ export function Workbench() {
         <span className="text-slate-700">|</span>
         <span>
           gdb: {data?.gdb.version ?? "unknown"} · mi3:{" "}
-          {data?.gdb.supports_mi3 ? "yes" : "no"}
+          {data?.gdb.supports_mi3 ? "yes" : "no"} · arch:{" "}
+          {data?.platform.architecture ?? "unknown"}
         </span>
         <span className="text-slate-700">|</span>
         <span>pwndbg: {data?.pwndbg.status ?? "unknown"}</span>

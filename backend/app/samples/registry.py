@@ -96,8 +96,18 @@ def _read_readme(directory: Path) -> tuple[str | None, str | None]:
 
 
 def discover_samples(samples_dir: Path) -> list[SampleRecord]:
-    """Scan ``samples_dir`` for valid sample directories, sorted by id."""
+    """Scan ``samples_dir`` for valid sample directories, sorted by id.
+
+    Sample directories and their sources must resolve inside ``samples_dir`` so a
+    symlink cannot point discovery outside the allowed sample root. Nothing found
+    here is executed by the API.
+    """
     if not samples_dir.is_dir():
+        return []
+
+    try:
+        root = samples_dir.resolve()
+    except OSError:
         return []
 
     records: list[SampleRecord] = []
@@ -106,8 +116,19 @@ def discover_samples(samples_dir: Path) -> list[SampleRecord]:
             continue
         if not SAMPLE_ID_RE.match(child.name):
             continue
+        try:
+            resolved_child = child.resolve()
+        except OSError:
+            continue
+        if not resolved_child.is_relative_to(root):
+            continue
         source = child / SOURCE_NAME
         if not source.is_file():
+            continue
+        try:
+            if not source.resolve().is_relative_to(root):
+                continue
+        except OSError:
             continue
         title, description = _read_readme(child)
         records.append(

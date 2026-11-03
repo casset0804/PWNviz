@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from app.samples.registry import discover_samples, get_sample
 
 SAMPLE_SOURCE = """\
@@ -101,3 +103,18 @@ def test_get_sample_rejects_traversal(tmp_path: Path) -> None:
     assert get_sample(samples, "stack-basic") is not None
     assert get_sample(samples, "../stack-basic") is None
     assert get_sample(samples, "unknown") is None
+
+
+def test_discover_skips_symlink_escape(tmp_path: Path) -> None:
+    samples = tmp_path / "samples"
+    samples.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "demo.c").write_text(SAMPLE_SOURCE, encoding="utf-8")
+    link = samples / "escaped"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:  # symlink creation needs privileges on some hosts
+        pytest.skip(f"cannot create symlink: {exc}")
+
+    assert discover_samples(samples) == []

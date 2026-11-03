@@ -6,7 +6,6 @@ documented degraded behaviour; they are skipped only where CI cannot provide GDB
 
 from __future__ import annotations
 
-import os
 import shutil
 
 import pytest
@@ -68,6 +67,9 @@ async def test_capabilities_probe_real_gdb(client: AsyncClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["platform"]["system"] == "Linux"
+    assert body["platform"]["architecture"] == "x86-64"
+    assert body["platform"]["is_x86_64"] is True
+    assert body["python"]["backend_version"]
     assert body["gdb"]["available"] is True
     assert body["gdb"]["version"]
     assert body["gdb"]["supports_mi3"] is True
@@ -76,28 +78,41 @@ async def test_capabilities_probe_real_gdb(client: AsyncClient) -> None:
     assert body["samples"]["count"] >= 1
 
 
-async def test_capabilities_fail_cleanly_without_gdb(client: AsyncClient) -> None:
+async def test_capabilities_fail_cleanly_without_gdb(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GDB_PATH", "pwnviz-definitely-missing-gdb")
     get_settings.cache_clear()
-    previous = os.environ.get("PWNVIZ_GDB_BINARY")
-    os.environ["PWNVIZ_GDB_BINARY"] = "pwnviz-definitely-missing-gdb"
     reset_capability_cache()
-    get_settings.cache_clear()
-    try:
-        response = await client.get("/api/v1/capabilities")
-    finally:
-        if previous is None:
-            os.environ.pop("PWNVIZ_GDB_BINARY", None)
-        else:
-            os.environ["PWNVIZ_GDB_BINARY"] = previous
-        get_settings.cache_clear()
-        reset_capability_cache()
+
+    response = await client.get("/api/v1/capabilities")
 
     assert response.status_code == 200
     body = response.json()
     assert body["gdb"]["available"] is False
+    assert body["gdb"]["error"]
     assert body["ready"] is False
-    assert any("missing" in warning.lower() or "not found" in warning.lower()
-               for warning in body["warnings"])
+    assert any(
+        "missing" in warning.lower() or "not found" in warning.lower()
+        for warning in body["warnings"]
+    )
+
+
+async def test_unexpected_probe_error_is_structured(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def boom(_settings):  # noqa: ANN001 - test double
+        raise RuntimeError("simulated probe crash")
+
+    monkeypatch.setattr("app.api.routes_capabilities.probe_gdb", boom)
+    reset_capability_cache()
+
+    response = await client.get("/api/v1/capabilities")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["error"]["code"] == "capability_probe_failed"
+    assert "simulated probe crash" in body["error"]["detail"]["error"]
 
 
 async def test_capabilities_are_cached(client: AsyncClient) -> None:

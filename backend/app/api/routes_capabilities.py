@@ -15,7 +15,9 @@ from fastapi import APIRouter, Query
 
 from app import __version__
 from app.core.config import Settings, get_settings
-from app.debugger.environment import probe_gdb, probe_pwndbg
+from app.core.errors import CapabilityProbeError
+from app.core.logging import get_logger
+from app.debugger.environment import detect_architecture, probe_gdb, probe_pwndbg
 from app.samples.registry import discover_samples
 from app.schemas.capabilities import (
     CapabilitiesResponse,
@@ -30,6 +32,7 @@ from app.schemas.capabilities import (
 from app.schemas.common import utc_now_iso
 
 router = APIRouter(tags=["capabilities"])
+logger = get_logger("pwnviz.capabilities")
 
 _QUICK = "quick"
 _VERIFIED = "verified"
@@ -46,8 +49,14 @@ async def build_capabilities(
         probe_pwndbg(settings, verify=verify_pwndbg),
     )
     samples = discover_samples(settings.samples_dir)
+    architecture = detect_architecture()
 
     warnings: list[str] = []
+    if not architecture.is_x86_64:
+        warnings.append(
+            f"Host architecture is {architecture.machine or 'unknown'}, not x86-64; "
+            "the PWNviz MVP only supports x86-64 Linux ELF targets."
+        )
     if not gdb_probe.available:
         warnings.append(
             gdb_probe.error or f"GDB binary {settings.gdb_binary!r} is not available."
@@ -93,6 +102,7 @@ async def build_capabilities(
         and gdb_probe.supported
         and gdb_probe.supports_mi3
         and gdb_probe.python.available
+        and architecture.is_x86_64
     )
 
     return CapabilitiesResponse(
@@ -101,7 +111,9 @@ async def build_capabilities(
         platform=PlatformInfo(
             system=platform.system(),
             release=platform.release(),
-            machine=platform.machine(),
+            machine=architecture.machine,
+            architecture=architecture.display,
+            is_x86_64=architecture.is_x86_64,
             hostname=platform.node(),
         ),
         python=PythonInfo(
@@ -141,6 +153,22 @@ async def build_capabilities(
     )
 
 
+async def _safe_build(
+    settings: Settings, *, verify_pwndbg: bool
+) -> CapabilitiesResponse:
+    """Run the probe pipeline and convert unexpected failures into API errors."""
+    try:
+        return await build_capabilities(settings, verify_pwndbg=verify_pwndbg)
+    except CapabilityProbeError:
+        raise
+    except Exception as exc:  # defensive: never leak a raw 500 to the browser
+        logger.exception("capability probe failed unexpectedly")
+        raise CapabilityProbeError(
+            "Capability probe failed unexpectedly.",
+            detail={"error": f"{type(exc).__name__}: {exc}"},
+        ) from exc
+
+
 @router.get("/capabilities", response_model=CapabilitiesResponse)
 async def get_capabilities(
     verify_pwndbg: bool = Query(
@@ -162,7 +190,7 @@ async def get_capabilities(
             if quick_cached and quick_cached[0] > now:
                 return quick_cached[1]
 
-        result = await build_capabilities(settings, verify_pwndbg=verify_pwndbg)
+        result = await _safe_build(settings, verify_pwndbg=verify_pwndbg)
 
         if verify_pwndbg and result.pwndbg.verified:
             # A verified report is more informative; serve it for quick calls too.
@@ -178,4 +206,8 @@ def reset_capability_cache() -> None:
     _cache.clear()
 
 
-__all__ = ["router", "build_capabilities", "reset_capability_cache"]
+__all__ = [
+    "router",
+    "build_capabilities",
+    "reset_capability_cache",
+]

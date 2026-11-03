@@ -124,7 +124,7 @@ export function EnvironmentPanel({
             {error}
           </p>
           <p className="mt-2 font-mono text-[10px] text-slate-500">
-            wsl -d Ubuntu-22.04 -- bash /mnt/f/Pwnvis/scripts/dev_backend.sh
+            run from the repo root: bash scripts/dev_backend.sh
           </p>
         </div>
       ) : null}
@@ -201,11 +201,28 @@ export function EnvironmentPanel({
               ) : null}
             </Card>
 
-            <Card title="Host & Python">
+            <Card
+              title="Host & Python"
+              status={
+                <StatusBadge
+                  tone={capabilities.platform.is_x86_64 ? "ok" : "error"}
+                >
+                  {capabilities.platform.is_x86_64
+                    ? "x86-64 target"
+                    : "unsupported arch"}
+                </StatusBadge>
+              }
+            >
               <Row label="os">
                 {capabilities.platform.system} {capabilities.platform.release}
               </Row>
+              <Row label="architecture">
+                {capabilities.platform.architecture}
+              </Row>
               <Row label="machine">{capabilities.platform.machine}</Row>
+              <Row label="x86-64 check">
+                {capabilities.platform.is_x86_64 ? "yes" : "no"}
+              </Row>
               <Row label="hostname">{capabilities.platform.hostname}</Row>
               <Row label="backend py">
                 {capabilities.python.backend_version}

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from app.debugger.environment import (
+    detect_architecture,
     parse_gdb_version,
     pwndbg_candidates,
     strip_ansi,
@@ -59,6 +60,24 @@ def test_version_meets_minimum(
 
 def test_strip_ansi() -> None:
     assert strip_ansi("\x1b[31mpwndbg\x1b[0m: loaded") == "pwndbg: loaded"
+
+
+@pytest.mark.parametrize(
+    ("machine", "is_x86_64", "display"),
+    [
+        ("x86_64", True, "x86-64"),
+        ("AMD64", True, "x86-64"),
+        ("aarch64", False, "aarch64"),
+        ("riscv64", False, "riscv64"),
+        ("", False, "unknown"),
+    ],
+)
+def test_detect_architecture(machine: str, is_x86_64: bool, display: str) -> None:
+    probe = detect_architecture(machine)
+
+    assert probe.is_x86_64 is is_x86_64
+    assert probe.display == display
+    assert probe.machine == machine
 
 
 def test_pwndbg_candidates_reads_gdbinit(

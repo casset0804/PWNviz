@@ -13,6 +13,12 @@ class PlatformInfo(BaseModel):
     system: str
     release: str
     machine: str
+    architecture: str = Field(
+        description="Normalized target architecture, e.g. 'x86-64'."
+    )
+    is_x86_64: bool = Field(
+        description="True only when the host/target architecture is x86-64."
+    )
     hostname: str
 
 

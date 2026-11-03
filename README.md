@@ -18,11 +18,13 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
 - monorepo 骨架：`frontend/`、`backend/`、`samples/`、`scripts/`、`docs/`；
 - FastAPI 后端：`/health`、`/api/v1/capabilities`、`/api/v1/samples`；
 - 真实环境探测：`gdb --version`、GDB 内嵌 Python、`--interpreter=mi3` 支持、
-  pwndbg 安装检测 + 按需真实加载验证；
+  架构判定（x86-64 门控）、pwndbg 安装检测 + 按需真实加载验证；
+- 公开配置 `GDB_PATH` / `PWNDBG_INIT` / `API_HOST` / `API_PORT` /
+  `ALLOWED_SAMPLE_DIR`，GDB 缺失时后端仍可启动并返回 `unavailable`；
 - 内置样例 `samples/stack-basic/demo.c` 与编译脚本；
 - React + TypeScript + Vite + Tailwind + Zustand 深色 IDE 工作台骨架，
   环境面板展示真实探测结果；
-- 单元测试与真实环境集成测试（pytest，31 passed）；
+- 单元测试与真实环境集成测试（pytest，50 passed）；
 - 环境检查脚本在本机 0 failure / 0 warning。
 
 ![Phase 0 工作台（真实探测结果）](docs/assets/workbench-phase0.png)
@@ -84,7 +86,15 @@ wsl -d Ubuntu-22.04 -- bash /mnt/f/Pwnvis/scripts/build_samples.sh
 wsl -d Ubuntu-22.04 -- bash /mnt/f/Pwnvis/scripts/dev_backend.sh
 ```
 
-默认监听 `http://127.0.0.1:8000`。可直接访问 `/docs` 查看 OpenAPI。
+也可以直接：
+
+```bash
+cd backend
+~/.venvs/pwnviz/bin/python -m app
+```
+
+`python -m app` 会读取 `.env` 中的 `API_HOST` / `API_PORT`
+（默认 `127.0.0.1:8000`）。启动后访问 `/docs` 查看 OpenAPI。
 
 ### 5. 启动前端（Windows PowerShell）
 
@@ -108,6 +118,22 @@ I/O 拖慢 pip），可用 `PWNVIZ_VENV` 覆盖。
 
 集成测试会真实启动 `gdb --version`、`gdb --batch --interpreter=mi3`，并在
 pwndbg 可用时真实加载它；不会用 mock 冒充调试成功。
+
+### 7. 配置（`.env`）
+
+复制 `.env.example` 为 `.env`（该文件被 git 忽略）。Phase 0 的公开配置项：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `GDB_PATH` | `gdb` | GDB 可执行文件名或绝对路径；不存在时后端照常启动 |
+| `PWNDBG_INIT` | 空 | `gdbinit.py` 文件或其所在目录；空则自动检测 |
+| `API_HOST` | `127.0.0.1` | 后端绑定地址 |
+| `API_PORT` | `8000` | 后端绑定端口（非法值回退 8000） |
+| `ALLOWED_SAMPLE_DIR` | `<repo>/samples` | 只允许发现该目录之下的样例 |
+
+可选调优项（`PWNVIZ_*`：pwndbg 开关、超时、缓存 TTL、CORS、栈窗口）见
+[.env.example](.env.example)。旧的 `PWNVIZ_GDB_BINARY` / `PWNVIZ_PWNDBG_PATH` /
+`PWNVIZ_SAMPLES_DIR` / `PWNVIZ_HOST` / `PWNVIZ_PORT` 仍作为兼容别名。
 
 ---
 

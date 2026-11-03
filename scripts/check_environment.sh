@@ -16,14 +16,19 @@ info() { printf '  [INFO] %s\n' "$1"; }
 echo "== platform =="
 if [ "$(uname -s)" = "Linux" ]; then
   pass "$(uname -sr) ($(uname -m))"
+  if [ "$(uname -m)" = "x86_64" ]; then
+    pass "x86-64 target architecture"
+  else
+    fail "PWNviz MVP requires x86-64; found $(uname -m)"
+  fi
 else
   fail "PWNviz debugger requires Linux; found $(uname -s). Use WSL2/Ubuntu."
 fi
 
 echo "== gdb =="
-GDB_BIN="${PWNVIZ_GDB_BINARY:-gdb}"
+GDB_BIN="${GDB_PATH:-${PWNVIZ_GDB_BINARY:-gdb}}"
 if ! command -v "$GDB_BIN" >/dev/null 2>&1; then
-  fail "gdb not found (set PWNVIZ_GDB_BINARY or apt install gdb)"
+  fail "gdb not found at '$GDB_BIN' (set GDB_PATH or apt install gdb)"
 else
   GDB_VERSION_LINE="$("$GDB_BIN" --version 2>&1 | head -1)"
   GDB_VERSION="$(printf '%s\n' "$GDB_VERSION_LINE" | sed -n 's/.*) \([0-9][0-9.]*\).*/\1/p')"
@@ -59,7 +64,7 @@ fi
 
 echo "== pwndbg (optional) =="
 PWNDBG_DIR=""
-for candidate in "${PWNVIZ_PWNDBG_PATH:-}" "${PWNDBG_GDB_PATH:-}" \
+for candidate in "${PWNDBG_INIT:-}" "${PWNVIZ_PWNDBG_PATH:-}" "${PWNDBG_GDB_PATH:-}" \
   "$(sed -n 's/^source \(.*gdbinit\.py\).*/\1/p' "$HOME/.gdbinit" 2>/dev/null | head -1)" \
   /opt/pwndbg /usr/share/pwndbg "$HOME/pwndbg"; do
   [ -n "$candidate" ] || continue

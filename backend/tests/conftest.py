@@ -11,8 +11,12 @@ from app.core.config import BACKEND_ROOT, REPO_ROOT, Settings, get_settings
 
 
 @pytest.fixture(autouse=True)
-def _fresh_settings() -> None:
-    """Give each test a settings object free of cross-test cache state."""
+def _fresh_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give each test a settings object free of cross-test cache state.
+
+    Local ``.env`` files are ignored so tests assert the documented defaults.
+    """
+    monkeypatch.setenv("PWNVIZ_DISABLE_DOTENV", "1")
     get_settings.cache_clear()
     reset_capability_cache()
     yield
@@ -34,10 +38,13 @@ def make_settings(tmp_path: Path):
             backend_root=BACKEND_ROOT,
             repo_root=REPO_ROOT,
             samples_dir=tmp_path / "samples",
+            allowed_sample_dir=tmp_path / "samples",
             gdb_binary="gdb",
             gdb_min_version=(12, 1, 0),
             pwndbg_path=None,
             load_pwndbg=True,
+            api_host="127.0.0.1",
+            api_port=8000,
             probe_timeout_seconds=5.0,
             pwndbg_probe_timeout_seconds=5.0,
             capabilities_cache_seconds=30.0,

@@ -4,6 +4,8 @@ export interface PlatformInfo {
   system: string;
   release: string;
   machine: string;
+  architecture: string;
+  is_x86_64: boolean;
   hostname: string;
 }
 

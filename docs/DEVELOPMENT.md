@@ -123,6 +123,12 @@ wsl -d Ubuntu-22.04 -- bash -c \
 31 passed in 7.37s
 ```
 
+Phase 0 复核（环境变量与架构字段）后再次执行：
+
+```text
+50 passed in 10.24s
+```
+
 其中集成测试真实执行 `gdb --version`、MI3 探测、pwndbg 加载验证与样例扫描；
 失败路径测试使用一个只打印固定文本的假 `gdb` 脚本验证超时/失败分支，
 **不用于冒充真实调试成功**。
@@ -156,6 +162,7 @@ wsl -d Ubuntu-22.04 -- bash /mnt/f/Pwnvis/scripts/check_environment.sh
 
 ```text
 [PASS] Linux 6.6.87.2-microsoft-standard-WSL2 (x86_64)
+[PASS] x86-64 target architecture
 [PASS] GDB 12.1 (/usr/bin/gdb)
 [PASS] GDB 12.1 meets the 12.1 minimum
 [PASS] GDB embedded Python 3.10.12
@@ -174,8 +181,11 @@ wsl -d Ubuntu-22.04 -- bash /mnt/f/Pwnvis/scripts/check_environment.sh
 
 ```bash
 cd /mnt/f/Pwnvis/backend
-~/.venvs/pwnviz/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+PWNVIZ_RELOAD=0 ~/.venvs/pwnviz/bin/python -m app
 ```
+
+`python -m app` 读取 `API_HOST` / `API_PORT`（环境变量或仓库根 `.env`），
+默认监听 `127.0.0.1:8000`。
 
 `GET /health`：
 
@@ -275,3 +285,74 @@ frontend/src/services/websocket.ts / stores/sessionStore.ts / 栈视图
 验收：StepI 前后 `gdb` PID 不变；RIP 前进的实际字节数等于指令长度；
 `push rbp` 后 RSP 减 8 且该地址出现旧 RBP；连续快速 Step 不错线；
 关闭会话后无残留 GDB/inferior 进程。详见 [PHASES.md](PHASES.md)。
+
+## 13. Phase 0 复核（环境变量、架构与缺失 GDB 验收）
+
+本轮按总控要求补齐 `GDB_PATH` / `PWNDBG_INIT` / `API_HOST` / `API_PORT` /
+`ALLOWED_SAMPLE_DIR`，并在 capabilities 中显式给出 `platform.architecture` 与
+`platform.is_x86_64`。以下均为实际执行结果。
+
+### 13.1 单元与集成测试
+
+```text
+50 passed in 10.24s
+```
+
+新增覆盖：配置别名与优先级、非法 `API_PORT` 回退、`pwndbg_init` 文件/目录、
+架构分类、样例根目录符号链接逃逸、探测异常返回 503。
+
+### 13.2 正常环境
+
+```text
+GET /health            -> 200, gdb_binary=gdb
+GET /capabilities      -> ready=True, architecture=x86-64, is_x86_64=True,
+                          gdb 12.1 / MI3 true / python 3.10.12,
+                          pwndbg=detected (quick), warnings=0
+```
+
+### 13.3 缺失 GDB（真实启动第二个后端，端口 8001）
+
+```bash
+GDB_PATH=/nonexistent/pwnviz-gdb API_PORT=8001 python -m app
+```
+
+```text
+health.status=ok gdb_binary=/nonexistent/pwnviz-gdb
+ready=False gdb.available=False gdb.version=null
+warning: GDB binary '/nonexistent/pwnviz-gdb' not found or not executable: ...
+```
+
+进程未崩溃，`/health` 仍 200，能力接口 200 且降级。
+
+### 13.4 `.env` 与 API_PORT
+
+创建临时 `.env`（`API_PORT=8002`）后启动：
+
+```text
+port 8000 -> ok（旧实例）
+port 8002 -> ok, gdb=gdb, samples=/mnt/f/Pwnvis/samples
+```
+
+确认 `python -m app` 读取 `.env` 的 `API_PORT`；验证后已删除临时 `.env`。
+
+### 13.5 启动脚本
+
+```bash
+API_PORT=8003 PWNVIZ_RELOAD=0 bash scripts/dev_backend.sh
+```
+
+```text
+dev script port 8003 -> ok, uptime=4.935
+```
+
+### 13.6 前端
+
+`npm run build` 通过；页面经 Vite proxy 获取到
+`architecture=x86-64 / is_x86_64=true`。截图已更新为
+[assets/workbench-phase0.png](assets/workbench-phase0.png)，可见
+“X86-64 TARGET”状态、`ARCHITECTURE x86-64` 与 `X86-64 CHECK yes`。
+
+### 13.7 仍未实现
+
+Phase 1 的真实 GDB 会话、快照与 WebSocket 均未开始；三类调试面板仍明确显示
+`no live session`，不包含任何伪造的寄存器或内存值。
