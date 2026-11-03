@@ -53,7 +53,7 @@ export function Workbench() {
       />
 
       <footer className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-[#1e2635] bg-[#0b0f16] px-4 py-1.5 font-mono text-[10px] text-slate-600">
-        <span>PWNviz v0.1.0 · phase 0 skeleton</span>
+        <span>PWNviz v0.1.0 · phase 1 backend ready · UI not wired</span>
         <span className="text-slate-700">|</span>
         <span>
           gdb: {data?.gdb.version ?? "unknown"} · mi3:{" "}

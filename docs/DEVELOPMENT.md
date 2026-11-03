@@ -265,26 +265,25 @@ cd F:\Pwnvis\frontend; npm run dev
 - GDB 12.1 的 `-ex` 是 CLI 命令，MI 命令必须在 MI prompt 下发送；
 - 后端只监听 `127.0.0.1`，仅用于本机可信样例。
 
-## 12. 下一步（Phase 1）
+## 12. Phase 1 计划（已完成，实测见第 15 节）
 
-目标：真实单步闭环。计划改动：
+目标：真实单步闭环。实际实现：
 
 ```text
-backend/app/debugger/gdb_process.py     持久 GDB MI3 子进程
-backend/app/debugger/mi_controller.py   单 reader + 命令队列 + 事件分发
+backend/app/debugger/gdb_process.py     持久 GDB MI3 子进程（独立进程组）
+backend/app/debugger/mi_controller.py   单 reader + token future + 事件队列
 backend/app/debugger/pwndbg_loader.py   可选 pwndbg 加载
 backend/app/sessions/{manager,session,state}.py
 backend/app/collector/{registers,frames,memory,disassembly,snapshot}.py
 backend/app/analysis/diff.py
 backend/app/api/{routes_sessions,websocket}.py
 backend/app/schemas/{session,snapshot}.py
-backend/tests/integration/test_step_loop.py   # 真实 GDB 集成测试
-frontend/src/services/websocket.ts / stores/sessionStore.ts / 栈视图
+backend/tests/integration/test_session_lifecycle.py  # 真实 GDB 会话验收
 ```
 
-验收：StepI 前后 `gdb` PID 不变；RIP 前进的实际字节数等于指令长度；
-`push rbp` 后 RSP 减 8 且该地址出现旧 RBP；连续快速 Step 不错线；
-关闭会话后无残留 GDB/inferior 进程。详见 [PHASES.md](PHASES.md)。
+验收结果：StepI 前后 `gdb` PID 不变；RIP 增量等于快照记录的指令长度；
+会话、finish、continue、interrupt、超时恢复、DELETE 清理均通过真实测试。
+`push rbp` 专用断言与 50 次压力测试仍待补，详见 [PHASES.md](PHASES.md)。
 
 ## 13. Phase 0 复核（环境变量、架构与缺失 GDB 验收）
 
@@ -437,8 +436,133 @@ tests/unit/test_samples_registry.py::test_binary_symlink_outside_root_is_skipped
 ### 14.6 测试总量
 
 ```text
-75 passed
+75 passed（Phase 0 审计时）
 ```
 
 其中真实 GDB 集成测试 2 类（capabilities 探测、MI3 load/break/run/step/memory），
 其余为真实文件系统/子进程/ASGI 测试；没有为了通过测试而删除真实集成测试或改成 mock。
+
+## 15. Phase 1 实测记录（真实 GDB 调试链路，2026-11-03）
+
+### 15.1 环境
+
+```text
+GNU gdb (Ubuntu 12.1-0ubuntu1~22.04.2) 12.1
+gdb embedded Python 3.10.12
+pwndbg /home/casset/pwndbg（真实 session 内加载成功，snapshot.warnings 为空）
+```
+
+### 15.2 真实执行的 GDB/MI 命令
+
+```text
+gdb --quiet --nx --interpreter=mi3
+-gdb-set confirm off
+-gdb-set pagination off
+-gdb-set width 0
+-gdb-set height 0
+-gdb-set mi-async on
+-interpreter-exec console "source /home/casset/pwndbg/gdbinit.py"   # 可选
+-file-exec-and-symbols "/mnt/f/Pwnvis/samples/stack-basic/demo"
+-break-insert main
+-exec-run
+-data-list-register-names
+-data-list-register-values x 16 7 6 0 ...
+-stack-list-frames 0 31
+-data-disassemble -s 0x401147 -e 0x4011a7 -- 1
+-data-read-memory-bytes 0x00007fffffffe1f0 64
+-exec-step-instruction
+-gdb-exit
+```
+
+### 15.3 真实快照（本机）
+
+第一次停止（main 断点）：
+
+```text
+rip = 0x401160
+instruction = movl $0xa,-0xc(%rbp)   bytes=c745f40a000000
+rsp = 0x7fffffffe270
+rbp = 0x7fffffffe280
+stop_reason = breakpoint-hit
+```
+
+`step_instruction` 后：
+
+```text
+rip = 0x401167   （前进 7 = 指令字节数）
+instruction = movl $0x14,-0x8(%rbp)  bytes=c745f814000000
+snapshot_id = 2
+changed_registers = ["rip"]
+changed_bytes = [{address: 0x7fffffffe274, before: 00, after: 0a}]
+```
+
+该变化对应源码第 10 行 `volatile int a = 10;`，由 GDB 单步真实执行产生，
+不是 fixture。
+
+### 15.4 测试结果
+
+```text
+99 passed in 48.82s
+```
+
+核心真实集成测试：
+
+```text
+tests/integration/test_session_lifecycle.py
+  test_step_instruction_produces_real_snapshots
+  test_action_before_launch_is_rejected
+  test_continue_to_exit_and_cleanup
+  test_delete_running_session_cleans_up_processes
+  test_pwndbg_loading_is_optional_and_does_not_block_native_gdb
+  test_session_limit_is_enforced
+  test_next_actions_produce_stopped_snapshots
+  test_step_into_function_then_finish
+  test_launch_failure_sets_error_without_leaking
+
+tests/integration/test_websocket_stream.py
+  test_websocket_streams_state_and_snapshot
+  test_websocket_rejects_foreign_origin
+  test_websocket_unknown_session_is_closed
+
+tests/integration/test_mi_controller.py
+  test_command_timeout_does_not_kill_reader_or_lose_later_commands
+  test_interrupt_stops_a_running_inferior
+
+tests/unit/test_memory_unreadable.py
+tests/unit/test_diff.py
+```
+
+验证点：
+
+- 两次快照之间 `gdb_pid` 不变（同一持久 GDB）；
+- StepI 后 RIP 增量等于快照记录的指令字节长度；
+- 首次 diff 为空，第二次 diff 的 `previous_snapshot_id` 正确；
+- finish 从 `add_numbers` 返回 `main`，frames 以 GDB unwinder 为准；
+- DELETE 后 GDB 与 inferior PID 均从 `/proc` 消失；
+- 真实 `-exec-interrupt` 能在 `sleep(30)` 的 inferior 上停止；
+- 故意让一条命令超时后，reader 仍能执行后续命令并正常关闭；
+- WebSocket 连接先收到 state + snapshot，StepI 后收到 RUNNING/STOPPED/snapshot；
+- 非法 Origin/未知 session 被拒绝。
+
+### 15.5 过程中发现的真实问题
+
+1. **`-data-read-memory-bytes` 的 count 必须是十进制**：
+   `... 0x401160 0x10` 会返回 `Unable to read memory`；使用 `16` 正常。
+   采集器统一用十进制长度。
+2. **GDB CLI `source "path"` 不剥离双引号**：GDB 12.1 把引号当成文件名的一部分，
+   导致 pwndbg 首次加载失败。改为未加引号的绝对路径；含空白/控制字符的路径
+   降级为 warning。
+3. `-data-list-register-values x` 会返回大量向量寄存器；按名称索引只请求
+   18 个需要的寄存器，避免解析开销。
+4. `-exec-run` 的响应批次里可能已经包含 `*stopped`；会话通过 stop 纪元判断，
+   不能只看命令返回。
+5. `break main` 停在 main+12（序言之后），所以本样例的 `push rbp` 已在断点前
+   执行，`push rbp` 的 RSP-8 断言尚未单独覆盖。
+
+### 15.6 尚未解决的问题
+
+- 50 次连续快速 Step 压力测试尚未执行（已有单步/并发状态拒绝/超时测试）；
+- 前端尚未接入 session/snapshot（Phase 2）；
+- 无 session 空闲 TTL；目前依赖 DELETE 或后端 shutdown 清理；
+- 无断点增删、源码视图、DWARF 变量（Phase 3/4）；
+- 长时间运行的非交互目标依赖 interrupt；已用真实 sleep 程序验证一次。

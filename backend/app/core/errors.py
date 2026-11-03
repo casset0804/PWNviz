@@ -53,3 +53,45 @@ class SessionNotFoundError(PwnvizError):
 
     status_code = 404
     code = "session_not_found"
+
+
+class SessionStateError(PwnvizError):
+    """An action is not valid for the session's current state."""
+
+    status_code = 409
+    code = "invalid_session_state"
+
+
+class SampleNotBuiltError(PwnvizError):
+    """The teaching sample exists but its ELF has not been compiled yet."""
+
+    status_code = 409
+    code = "sample_not_built"
+
+
+class DebuggerError(PwnvizError):
+    """The debugger backend failed in a way the API reports as a gateway error."""
+
+    status_code = 502
+    code = "debugger_error"
+
+
+class DebuggerTimeoutError(PwnvizError):
+    """GDB accepted a command but did not report the expected stop in time."""
+
+    status_code = 504
+    code = "debugger_timeout"
+
+
+class SessionClosedError(PwnvizError):
+    """The session was terminated while an operation was in flight."""
+
+    status_code = 409
+    code = "session_closed"
+
+
+class TooManySessionsError(PwnvizError):
+    """The process-wide session limit has been reached."""
+
+    status_code = 429
+    code = "too_many_sessions"

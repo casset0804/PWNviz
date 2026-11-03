@@ -1,4 +1,4 @@
-# API 参考（Phase 0）
+# API 参考（Phase 0 / Phase 1）
 
 Base URL：`http://127.0.0.1:8000`（WSL 内 uvicorn）。
 前端开发服务器 `http://127.0.0.1:5173` 通过 Vite proxy 转发 `/api` 与 `/health`。
@@ -20,8 +20,15 @@ Base URL：`http://127.0.0.1:8000`（WSL 内 uvicorn）。
 | 400 | （Starlette）`Invalid host header` | `Host` 不在 `PWNVIZ_ALLOWED_HOSTS` 白名单 |
 | 403 | `cross_site_blocked` | 浏览器跨站请求（`Sec-Fetch-Site: cross-site`） |
 | 404 | `sample_not_found` | 样例不存在 |
+| 404 | `session_not_found` | 会话不存在或已删除 |
+| 409 | `invalid_session_state` | 动作与当前状态不符（如未 launch 就 step） |
+| 409 | `sample_not_built` | 样例 ELF 尚未编译 |
+| 409 | `session_closed` | 会话终止/关闭时操作仍在进行 |
 | 422 | `invalid_request` | 请求参数校验失败 |
-| 503 | `debugger_unavailable` | GDB 不可用（Phase 1 使用） |
+| 429 | `too_many_sessions` | 超过 `PWNVIZ_SESSION_MAX_ACTIVE` |
+| 502 | `debugger_error` | GDB/MI 命令失败 |
+| 504 | `debugger_timeout` | 等待 GDB stopped / 快照超时 |
+| 503 | `debugger_unavailable` | GDB 不可用（预留） |
 | 503 | `capability_probe_failed` | 探测无有效结果 |
 
 地址与 64-bit 值一律十六进制字符串（Phase 1 快照协议），绝不使用 JS Number。
@@ -227,17 +234,251 @@ credentials；跨站浏览器请求在到达路由前被拒绝；`Host` 头受�
 
 ---
 
-## Phase 1 计划端点（尚未实现）
+## 会话生命周期
 
-| Method | Endpoint | 用途 |
+```text
+CREATED ──launch──> INITIALIZING ──load/break/run──> RUNNING
+                                                        │
+                                              *stopped  ▼
+                                                    STOPPED ──step/continue/...──> RUNNING
+                                                        │
+                                      inferior exit     ▼
+                                                     EXITED
+
+任意阶段出错 ──> ERROR；DELETE ──> TERMINATED（并从管理器移除）
+```
+
+- 每个 session 拥有**一个持久 GDB/MI3 子进程**，不会每次单步重启；
+- 同一 session 的高层动作与快照采集使用同一把 `asyncio.Lock` 串行化；
+- MI 写命令另有短锁，命令使用递增 token，响应按 token 归属，异步 notify
+  独立排队；命令超时不会关闭 reader；
+- 只有收到 `*stopped` 后才采集快照；进程 running 时拒绝读取快照；
+- 目标退出/失败时 GDB 仍由 `DELETE` 或后端 shutdown 回收。
+
+## POST `/api/v1/sessions`
+
+创建会话（尚不启动 GDB）。请求：
+
+```json
+{
+  "sample_id": "stack-basic",
+  "stop_at": "main",
+  "load_pwndbg": false
+}
+```
+
+`sample_id` 只允许 `^[a-z0-9][a-z0-9._-]{0,63}$`，`stop_at` 只允许符号名
+`^[A-Za-z_][A-Za-z0-9_.]{0,127}$`（不会拼接为任意 GDB 命令）。
+`load_pwndbg` 省略时使用 `PWNVIZ_LOAD_PWNDBG`。
+
+响应 `201`（真实结构示例）：
+
+```json
+{
+  "session_id": "sess_...",
+  "sample_id": "stack-basic",
+  "state": "CREATED",
+  "created_at": "2026-11-03T02:00:00Z",
+  "updated_at": "2026-11-03T02:00:00Z",
+  "snapshot_count": 0,
+  "gdb_pid": null,
+  "inferior_pid": null,
+  "last_error": null,
+  "stop_reason": null
+}
+```
+
+样例未编译返回 `409 sample_not_built`，`detail.build_command` 给出编译命令。
+
+## GET `/api/v1/sessions/{session_id}`
+
+返回同一个 `SessionInfo`。launch 后包含真实 `gdb_pid` / `inferior_pid`；
+DELETE 后返回 404。
+
+## POST `/api/v1/sessions/{session_id}/launch`
+
+真实执行：
+
+```text
+gdb --quiet --nx --interpreter=mi3
+-gdb-set confirm off / pagination off / width 0 / height 0 / mi-async on
+[-interpreter-exec console "source <PWNDBG_INIT>"]   # 可选，失败仅 warning
+-file-exec-and-symbols "<sample binary>"
+-break-insert main
+-exec-run
+```
+
+等待 `*stopped,reason="breakpoint-hit"` → 采集第一份快照。响应：
+
+```json
+{
+  "session_id": "sess_...",
+  "state": "STOPPED",
+  "snapshot": { "...": "见下方 Snapshot" },
+  "message": null
+}
+```
+
+只有 `CREATED` 状态可 launch，否则 `409 invalid_session_state`。
+GDB 启动/命令失败 → `502 debugger_error`，会话进入 `ERROR` 并回收进程。
+
+## POST `/api/v1/sessions/{session_id}/actions`
+
+请求：`{"action": "step_instruction"}`。动作白名单：
+
+| action | GDB/MI 命令 | 语义 |
 |---|---|---|
-| POST | `/api/v1/sessions` | 创建会话（sample_id / stop_at / load_pwndbg） |
-| GET | `/api/v1/sessions/{id}` | 会话状态 |
-| POST | `/api/v1/sessions/{id}/launch` | 启动 GDB 并停在断点 |
-| POST | `/api/v1/sessions/{id}/actions` | 白名单动作：step/next/continue/interrupt/finish |
-| GET | `/api/v1/sessions/{id}/snapshots` | 快照历史（最近 200 条） |
-| DELETE | `/api/v1/sessions/{id}` | 终止并清理 |
-| WS | `/api/v1/sessions/{id}/stream` | 实时事件流 |
+| `launch` / `run` | 见上 | 仅 `CREATED` 可用 |
+| `step_instruction` | `-exec-step-instruction` | 单步一条机器指令 |
+| `next_instruction` | `-exec-next-instruction` | 指令级 step over |
+| `step` | `-exec-step` | 源码级 step into |
+| `next` | `-exec-next` | 源码级 step over |
+| `finish` | `-exec-finish` | 运行到当前帧返回（最外层会返回 502） |
+| `continue` | `-exec-continue` | 异步运行；返回时通常仍为 `RUNNING` |
+| `interrupt` | `-exec-interrupt` | 仅 `RUNNING` 可用；停止事件随后到达 |
 
-WebSocket 事件结构：`{"type": "...", "session_id": "...", "payload": {...}}`，
-事件类型见 [ARCHITECTURE.md](ARCHITECTURE.md#4-前后端协议)。
+- `stepi/nexti/step/next/finish`：动作在 HTTP 响应前等待对应 `*stopped` 与快照，
+  成功响应包含新 `snapshot`；
+- `continue/interrupt`：返回命令被 GDB 接受后的状态，后续 `session.state` 与
+  `snapshot` 通过 WebSocket 推送；REST 轮询 `GET /sessions/{id}` 也可观察；
+- 非 `STOPPED`（step 类）或非 `RUNNING`（interrupt）返回 `409`；
+- 快速连点：第二个请求会因状态变为 `RUNNING` 被拒绝，不会并发写 GDB。
+
+## GET `/api/v1/sessions/{session_id}/snapshots`
+
+```json
+{
+  "session_id": "sess_...",
+  "count": 2,
+  "snapshots": [ { "...": "Snapshot[]，最旧在前" } ]
+}
+```
+
+每个 session 最多保留 `PWNVIZ_SESSION_MAX_SNAPSHOTS`（默认 200）条；
+`snapshot_id` 单调递增。
+
+## DELETE `/api/v1/sessions/{session_id}`
+
+`204 No Content`。发送 `-gdb-exit`，等待 GDB 退出，必要时 kill 整个进程组，
+然后从管理器移除；GDB 与 inferior 进程都应消失。
+
+## WS `/api/v1/sessions/{session_id}/stream`
+
+- 只接受已存在 session；未知 id 以 `4404` 关闭；
+- 浏览器 `Origin` 不在 `PWNVIZ_ALLOWED_ORIGINS` 时以 `4403` 关闭；
+- 连接后先推当前 `session.state`，若有历史再推最近一条 `snapshot`；
+- 之后实时推送状态/快照；DELETE 时推送 `session.terminated` 后关闭。
+
+事件结构：`{"type": "...", "session_id": "...", "payload": {...}}`。
+
+```json
+{"type":"session.state","session_id":"sess_...","payload":{
+  "state":"STOPPED","stop_reason":"breakpoint-hit","last_error":null,
+  "updated_at":"2026-11-03T02:03:56Z"}}
+```
+
+```json
+{"type":"snapshot","session_id":"sess_...","payload":{ "...": "完整 Snapshot" }}
+```
+
+`session.terminated`：`{"type":"session.terminated","payload":{"state":"TERMINATED"}}`。
+
+## Snapshot 结构（真实字段）
+
+```json
+{
+  "session_id": "sess_...",
+  "snapshot_id": 2,
+  "timestamp": "2026-11-03T02:03:59Z",
+  "state": "STOPPED",
+  "stop_reason": "end-stepping-range",
+  "architecture": "x86-64",
+  "endianness": "little",
+  "pointer_bits": 64,
+  "registers": {
+    "rip": "0x0000000000401167",
+    "rsp": "0x00007fffffffe270",
+    "rbp": "0x00007fffffffe280",
+    "rax": "0x0000000000401154",
+    "eflags": "0x0000000000000202"
+  },
+  "frames": [
+    {
+      "level": 0,
+      "address": "0x0000000000401167",
+      "function": "main",
+      "file": "/.../samples/stack-basic/demo.c",
+      "line": 11
+    }
+  ],
+  "instruction": {
+    "address": "0x0000000000401167",
+    "bytes": "c745f814000000",
+    "mnemonic": "movl",
+    "operands": "$0x14,-0x8(%rbp)",
+    "text": "movl   $0x14,-0x8(%rbp)",
+    "function": "main"
+  },
+  "disassembly": [
+    {"address": "0x0000000000401160", "text": "movl   $0xa,-0xc(%rbp)",
+     "is_current": false, "function": "main"},
+    {"address": "0x0000000000401167", "text": "movl   $0x14,-0x8(%rbp)",
+     "is_current": true, "function": "main"}
+  ],
+  "stack": {
+    "range_start": "0x00007fffffffe1f0",
+    "range_end": "0x00007fffffffe3f0",
+    "word_size": 8,
+    "rows": [
+      {
+        "address": "0x00007fffffffe270",
+        "bytes": ["00","10","00","00","0a","00","00","00"],
+        "readable": true,
+        "qword_le": "0x0000000a00000010",
+        "ascii": "........",
+        "annotations": ["RSP"],
+        "changed_byte_offsets": [4]
+      }
+    ],
+    "unreadable_ranges": []
+  },
+  "diff": {
+    "previous_snapshot_id": 1,
+    "changed_registers": ["rip"],
+    "changed_bytes": [
+      {"address":"0x00007fffffffe274","before":"00","after":"0a"}
+    ],
+    "window_changed": false
+  },
+  "warnings": []
+}
+```
+
+> 示例来自本机真实会话，`rows`/`disassembly` 为简洁只保留相关行。
+> 完整快照包含 `rsp-0x80 .. rsp+0x180` 的 64 行（上限受配置约束）。
+
+### 不可读内存表示
+
+GDB 对不可读区域返回 `^error`（例如跨未映射页）。采集器按 64 字节分块读取，
+失败块继续采集其余块，并显式表示：
+
+- `rows[].bytes[i]` 为 `null`，而不是 `"00"` 或伪值；
+- 含未知字节的行 `readable=false`，`qword_le`/`ascii` 为 `null`；
+- `stack.unreadable_ranges` 列出不可读地址区间；
+- `snapshot.warnings` 说明缺失字节数量。
+
+单个不可读块不会让整个 session 或快照失败。
+
+### 地址与数值约定
+
+- 所有地址、寄存器值、qword 均为 `0x` + 16 位十六进制字符串；
+- 原始字节为 2 位小写 hex；不可读为 `null`；
+- 前端绝不把这些值转成 JavaScript Number。
+
+## 错误与恢复
+
+- GDB 命令超时：`504 debugger_timeout`，会话进入 `ERROR`，控制器/进程被清理；
+- GDB 返回 `^error`（如 `finish` 位于最外层）：`502 debugger_error`，
+  目标仍 stopped 时 session 保持 `STOPPED`，可继续操作；
+- 快照采集部分失败：session 仍 `STOPPED`，快照带 `warnings`/不可读区间；
+- 目标退出：`session.state=EXITED`，不再采集快照；DELETE 仍负责回收 GDB。

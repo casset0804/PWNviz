@@ -9,6 +9,7 @@ immutable and cached so every request sees the same view of the environment.
 from __future__ import annotations
 
 import os
+import shlex
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -23,11 +24,12 @@ REPO_ROOT = BACKEND_ROOT.parent
 DEFAULT_GDB_MIN_VERSION = (12, 1, 0)
 DEFAULT_API_HOST = "127.0.0.1"
 DEFAULT_API_PORT = 8000
-DEFAULT_ALLOWED_HOSTS = ("127.0.0.1", "localhost", "testserver")
+DEFAULT_API_ALLOWED_HOSTS = ("127.0.0.1", "localhost", "testserver")
 DEFAULT_ALLOWED_ORIGINS = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 )
+DEFAULT_GDB_ARGS = ("--quiet", "--nx", "--interpreter=mi3")
 
 
 def _first_env(*names: str) -> str | None:
@@ -98,6 +100,18 @@ def _env_origins(names: tuple[str, ...], default: tuple[str, ...]) -> tuple[str,
     return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
+def _env_tokens(names: tuple[str, ...], default: tuple[str, ...]) -> tuple[str, ...]:
+    """Parse a shell-like token list without invoking a shell."""
+    raw = _first_env(*names)
+    if raw is None:
+        return default
+    try:
+        tokens = tuple(shlex.split(raw))
+    except ValueError:
+        return default
+    return tokens or default
+
+
 @dataclass(frozen=True)
 class Settings:
     """Immutable runtime configuration for the PWNviz backend."""
@@ -124,6 +138,15 @@ class Settings:
     stack_window_below: int = 0x80
     stack_window_above: int = 0x180
     max_stack_read_bytes: int = 0x400
+    gdb_args: tuple[str, ...] = DEFAULT_GDB_ARGS
+    gdb_command_timeout_seconds: float = 10.0
+    gdb_stop_timeout_seconds: float = 15.0
+    session_max_snapshots: int = 200
+    session_max_active: int = 8
+    snapshot_max_frames: int = 32
+    memory_chunk_size: int = 0x40
+    disassembly_before: int = 0x20
+    disassembly_after: int = 0x40
 
     def describe(self) -> dict[str, object]:
         """Safe-to-log view of the settings (no secrets involved)."""
@@ -138,6 +161,7 @@ class Settings:
             "api_port": self.api_port,
             "allow_remote": self.allow_remote,
             "allowed_hosts": list(self.allowed_hosts),
+            "gdb_args": list(self.gdb_args),
             "log_level": self.log_level,
         }
 
@@ -160,7 +184,10 @@ def get_settings() -> Settings:
     )
 
     api_host = _env_str(("API_HOST", "PWNVIZ_HOST"), DEFAULT_API_HOST)
-    default_hosts = list(DEFAULT_ALLOWED_HOSTS)
+    gdb_binary = os.path.expandvars(
+        os.path.expanduser(_env_str(("GDB_PATH", "PWNVIZ_GDB_BINARY"), "gdb"))
+    )
+    default_hosts = list(DEFAULT_API_ALLOWED_HOSTS)
     if api_host not in {"0.0.0.0", "::", "[::]"} and not is_loopback_host(api_host):
         if api_host not in default_hosts:
             default_hosts.append(api_host)
@@ -170,7 +197,7 @@ def get_settings() -> Settings:
         repo_root=REPO_ROOT,
         samples_dir=samples_dir,
         allowed_sample_dir=samples_dir,
-        gdb_binary=_env_str(("GDB_PATH", "PWNVIZ_GDB_BINARY"), "gdb"),
+        gdb_binary=gdb_binary,
         gdb_min_version=DEFAULT_GDB_MIN_VERSION,
         pwndbg_path=pwndbg_path,
         load_pwndbg=_env_bool(("PWNVIZ_LOAD_PWNDBG",), True),
@@ -194,4 +221,17 @@ def get_settings() -> Settings:
         stack_window_below=_env_int(("PWNVIZ_STACK_WINDOW_BELOW",), 0x80),
         stack_window_above=_env_int(("PWNVIZ_STACK_WINDOW_ABOVE",), 0x180),
         max_stack_read_bytes=_env_int(("PWNVIZ_MAX_STACK_READ_BYTES",), 0x400),
+        gdb_args=_env_tokens(("PWNVIZ_GDB_ARGS",), DEFAULT_GDB_ARGS),
+        gdb_command_timeout_seconds=_env_float(
+            ("PWNVIZ_GDB_COMMAND_TIMEOUT_SECONDS",), 10.0
+        ),
+        gdb_stop_timeout_seconds=_env_float(
+            ("PWNVIZ_GDB_STOP_TIMEOUT_SECONDS",), 15.0
+        ),
+        session_max_snapshots=_env_int(("PWNVIZ_SESSION_MAX_SNAPSHOTS",), 200),
+        session_max_active=_env_int(("PWNVIZ_SESSION_MAX_ACTIVE",), 8),
+        snapshot_max_frames=_env_int(("PWNVIZ_SNAPSHOT_MAX_FRAMES",), 32),
+        memory_chunk_size=_env_int(("PWNVIZ_MEMORY_CHUNK_SIZE",), 0x40),
+        disassembly_before=_env_int(("PWNVIZ_DISASSEMBLY_BEFORE",), 0x20),
+        disassembly_after=_env_int(("PWNVIZ_DISASSEMBLY_AFTER",), 0x40),
     )

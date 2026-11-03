@@ -13,11 +13,18 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import __version__
-from app.api import routes_capabilities, routes_health, routes_samples
+from app.api import (
+    routes_capabilities,
+    routes_health,
+    routes_samples,
+    routes_sessions,
+    websocket,
+)
 from app.core.config import get_settings
 from app.core.errors import PwnvizError
 from app.core.logging import configure_logging
 from app.core.security import is_loopback_host
+from app.sessions.manager import session_manager
 
 logger = logging.getLogger("pwnviz")
 
@@ -35,7 +42,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             settings.api_host,
         )
     yield
-    logger.info("PWNviz backend shutting down")
+    logger.info("PWNviz backend shutting down; terminating debug sessions")
+    await session_manager.shutdown()
 
 
 def create_app() -> FastAPI:
@@ -83,6 +91,8 @@ def create_app() -> FastAPI:
     app.include_router(routes_health.router)
     app.include_router(routes_capabilities.router, prefix="/api/v1")
     app.include_router(routes_samples.router, prefix="/api/v1")
+    app.include_router(routes_sessions.router, prefix="/api/v1")
+    app.include_router(websocket.router, prefix="/api/v1")
 
     @app.exception_handler(PwnvizError)
     async def _pwnviz_error(_: Request, exc: PwnvizError) -> JSONResponse:
@@ -113,6 +123,7 @@ def create_app() -> FastAPI:
             "health": "/health",
             "capabilities": "/api/v1/capabilities",
             "samples": "/api/v1/samples",
+            "sessions": "/api/v1/sessions",
             "docs": "/docs",
         }
 

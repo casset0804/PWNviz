@@ -23,8 +23,9 @@ PWNviz 第一版是**本机单用户教学工具**：
 - **样例根目录约束**：样例目录、`demo.c`、`README.md` 与二进制解析后必须仍位于
   `ALLOWED_SAMPLE_DIR` 之内；指向根目录外的符号链接会被忽略（README 不读取，
   二进制不登记）；
-- **不执行提交内容**：Phase 0 的 API 只做探测与读取，不运行样例、不接收上传文件；
-- **错误结构化**：探测失败返回可读 warning，不泄露堆栈给浏览器；
+- **仅执行受信样例**：会话目标来自 `samples/` 注册表，`sample_id` 白名单校验；
+  不提供上传、任意路径加载或任意 GDB 命令；Phase 1 仍只在本机可信样例范围内；
+- **错误结构化**：探测/调试失败返回可读 warning 或稳定 error code，不泄露堆栈给浏览器；
 - **仅本机绑定**：`python -m app` 在 `API_HOST` 非 loopback 时默认拒绝启动（退出码
   2），必须显式设置 `PWNVIZ_ALLOW_REMOTE=1`；lifespan 对 CLI 启动方式给出 warning；
 - **Host 白名单**：`TrustedHostMiddleware` 拒绝非预期 `Host` 头（默认
@@ -36,14 +37,31 @@ PWNviz 第一版是**本机单用户教学工具**：
 - **真实 MI 集成测试**：`tests/integration/test_gdb_mi_smoke.py` 启动真实 GDB/MI3，
   加载样例、命中 `main`、单步、读取寄存器/内存，并断言 inferior 进程在退出后消失。
 
-## Phase 1 必须遵守
+## Phase 1 已落实
 
-- 动作采用枚举白名单，绝不接受任意 GDB 命令字符串；
-- `session_id` 使用不可预测随机值（`secrets.token_urlsafe`）；
-- WebSocket 只允许订阅已存在的 session；
-- 每个 session 有命令超时与快照数量上限（默认 200）；
-- 终止会话时确保 GDB 与 inferior 进程被 kill 并回收；
-- 目标路径必须解析后仍位于样例根目录内（`Path.resolve()` 前缀检查）。
+- 动作采用枚举白名单（`launch/run/continue/interrupt/step_instruction/next_instruction/step/next/finish`），
+  绝不接受任意 GDB 命令字符串；
+- `stop_at` 仅允许符号名 `^[A-Za-z_][A-Za-z0-9_.]{0,127}$`，文件路径来自样例注册表；
+- `session_id` 使用 `secrets.token_urlsafe(18)`，不可预测；
+- WebSocket 只允许已存在 session，并校验浏览器 `Origin`；未知 session 以 4404、
+  非法 Origin 以 4403 关闭；不同 session 不共享订阅队列；
+- 每会话命令超时（默认 10s）、等待 stopped 超时（默认 15s）、最多 200 张快照；
+- 进程级限制 `PWNVIZ_SESSION_MAX_ACTIVE`（默认 8），防止无限 GDB 进程；
+- 终止会话：`-gdb-exit` → 等待退出 → 进程组 kill 兜底；集成测试通过 `/proc`
+  确认 GDB 与 inferior 均消失；
+- 快照中的地址/寄存器/qword 全部是十六进制字符串，不可读字节为 `null`；
+- 变量名、返回地址等语义标注未在 Phase 1 生成，不会把未知 qword 冒充语义。
+
+## Phase 1 仍需注意
+
+- 没有用户认证：安全依赖 loopback 绑定、Host/Origin 校验、不可预测 session ID；
+  任何能读取 session ID 的本机进程都可控制该会话；
+- 没有 session 空闲 TTL；异常退出（如后端 `SIGKILL`）时 GDB 子进程可能残留，
+  依赖下次启动/人工清理；容器化与 PDEATHSIG 属于后续加固；
+- GDB 路径、启动参数、pwndbg 路径来自本地配置（不是 HTTP 输入），应视为管理员
+  可信配置；
+- 被调试 ELF 仍是受信任教学程序，不提供沙箱隔离；
+- 不要把 `PWNVIZ_ALLOW_REMOTE=1` 的实例暴露到不可信网络。
 
 ## 未来开放上传/多人时的强制要求
 

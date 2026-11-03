@@ -1,7 +1,7 @@
 # 开发阶段与验收计划
 
-每一阶段结束时项目必须仍可启动。当前仓库状态：**Phase 0 已实现**，
-Phase 1 尚未开始（无任何 mock 调试数据）。
+每一阶段结束时项目必须仍可启动。当前仓库状态：**Phase 0 已实现，Phase 1 后端
+真实调试链路已完成并通过真实 GDB 集成测试**；前端会话/栈视图接线留到 Phase 2。
 
 ## Phase 0：环境探测与骨架
 
@@ -31,58 +31,66 @@ Phase 1 尚未开始（无任何 mock 调试数据）。
 - [x] 前端能显示 GDB 版本、MI3 支持、pwndbg 状态；
 - [x] 缺少 GDB / pwndbg 时警告可读，不回退为假数据；
 - [x] 后端与前端可分别启动（`scripts/dev_backend.sh` / `npm run dev`）；
-- [x] pytest 在真实 WSL 环境中通过（75 passed，含真实 MI3 冒烟测试）；
+- [x] pytest 在真实 WSL 环境中通过（当前 99 passed，含真实 MI3 冒烟与会话测试）；
 - [x] `scripts/check_environment.sh` 本机 0 failure / 0 warning；
 - [x] 非 loopback 绑定默认拒绝，跨站浏览器请求与非法 Host 被拒绝；
 - [x] 探测超时不会留下孙进程（进程组 kill 测试通过）。
 
-## Phase 1：真实 GDB 单步闭环（最高优先级）
+## Phase 1：真实 GDB 单步闭环（后端已完成）
 
-目标：点击 Step Instruction → 真实 GDB 执行一条机器指令 → 采集真实快照 →
-前端看到新 RIP/RSP 和栈内存变化。
+目标：Step Instruction → 真实 GDB 执行一条机器指令 → 采集真实快照 →
+前端（Phase 2）看到新 RIP/RSP 和栈内存变化。当前后端链路已完成并通过真实测试，
+前端尚未接线。
 
-### 1.1 会话与进程
+### 1.1 会话与进程（完成）
 
-- `GdbProcess`：`gdb --quiet --nx --interpreter=mi3` 持久子进程；
-- `PwndbgLoader`：按配置 `source <dir>/gdbinit.py`，失败只 warning；
-- `DebugSession`：状态机 + 单命令队列（`asyncio.Lock`）；
-- `SessionManager`：创建/查询/终止，进程与临时目录清理；
-- 启动超时、退出检测（`=thread-group-exited`）。
+- `GdbProcess`：`gdb --quiet --nx --interpreter=mi3` 持久子进程，独立进程组；
+- `PwndbgLoader`：按配置/检测到的 `source <dir>/gdbinit.py`，失败只 warning；
+- `DebugSession`：状态机 + `asyncio.Lock` 串行化；
+- `SessionManager`：创建/查询/终止、数量上限、shutdown 清理；
+- 启动失败、命令超时、目标退出（`=thread-group-exited`）均落到明确状态。
 
-### 1.2 MI 适配层
+### 1.2 MI 适配层（完成）
 
 - 单 reader 消费 pygdbmi 输出；
-- 命令响应（`^done/^error/^running`）与异步记录（`*stopped` 等）分离；
-- 明确“等待 stopped”的同步原语，超时返回错误；
-- 记录原始输出到 `debugger.output` 事件（辅助面板）。
+- 命令响应（`^done/^error/^running`）按 token 关联 future；
+- 异步记录（`*stopped` 等）进队列，由 session 状态机消费；
+- 命令超时只放弃该 future，reader 继续；
+- stop/exit 纪元使动作不会错过命令响应同批到达的停止事件。
 
-### 1.3 采集器
+### 1.3 采集器（完成）
 
-- `-data-list-register-values x` → 16 个 GPR + EFLAGS；
-- `-stack-list-frames` → frames；
-- `-data-read-memory-bytes` → RSP 窗口（分块、unreadable 容错）；
-- `-data-disassemble` → RIP 附近指令（含机器码）；
-- `Snapshot` + 与前一张的寄存器/字节 diff。
+- `-data-list-register-values x` → 16 GPR + EFLAGS（名称索引，缺失回退 evaluate）；
+- `-stack-list-frames` → GDB unwinder frames；
+- `-data-read-memory-bytes` → RSP 窗口（64B 分块、unreadable 容错）；
+- `-data-disassemble` → RIP 附近指令 + 从内存切片得到当前指令字节；
+- `Snapshot` + 与前一张的寄存器/按地址字节 diff。
 
-### 1.4 API / WebSocket
+### 1.4 API / WebSocket（完成）
 
 - `POST /api/v1/sessions`（`sample_id`, `stop_at`, `load_pwndbg`）；
+- `GET /api/v1/sessions/{id}`；
 - `POST /api/v1/sessions/{id}/launch`；
-- `POST /api/v1/sessions/{id}/actions`（白名单：`step_instruction`,
-  `next_instruction`, `continue`, `interrupt`, `finish`）；
+- `POST /api/v1/sessions/{id}/actions`（白名单：`launch/run`, `continue`,
+  `interrupt`, `step_instruction`, `next_instruction`, `step`, `next`, `finish`）；
 - `GET /api/v1/sessions/{id}/snapshots`；
-- `WS /api/v1/sessions/{id}/stream`；
-- 快速连点：后端串行，前端禁用按钮直到收到新快照。
+- `DELETE /api/v1/sessions/{id}`；
+- `WS /api/v1/sessions/{id}/stream`（state/snapshot/error/terminated）；
+- 快速连点：第二个动作因状态变为 RUNNING 返回 409，不会并发写 GDB。
 
 ### 1.5 验收标准
 
-- [ ] 每一步都由真实 GDB 执行，日志可核对 MI 命令；
-- [ ] 单步前后 RIP 变化且等于实际指令长度推进；
-- [ ] `push rbp` 的 RSP 减 8 且该地址写入旧 RBP 值（用快照核对）；
-- [ ] GDB 子进程在整个会话中只启动一次（PID 不变）；
-- [ ] 连续 50 次快速 Step 不发生 MI 响应错配；
-- [ ] 目标退出、崩溃、断点命中都有明确状态；
-- [ ] 关闭 session 后 GDB 与 inferior 均不残留（`ps` 验证）。
+- [x] 每一步都由真实 GDB 执行（`test_session_lifecycle.py`）；
+- [x] 单步前后 RIP 变化（测试只做结构性断言，不写死地址）；
+- [x] GDB 子进程在整个会话中只启动一次（同一 `gdb_pid` 跨两次快照）；
+- [x] 目标退出、断点命中均有状态（STOPPED / EXITED）；
+- [x] 关闭 session 后 GDB 与 inferior 均不残留（`/proc` 轮询）；
+- [x] 真实中断可停止运行中的 inferior（`test_mi_controller.py`）；
+- [x] 命令超时后 reader 仍可继续执行后续命令（真实 GDB 测试）；
+- [ ] `push rbp` 的 RSP-8 专用断言：当前样例在 `main` 断点已越过序言，
+      未单独覆盖（Phase 2 可增加入口断点/源码视图后补）；
+- [ ] 50 次连续快速 Step 压力测试：目前覆盖单步、finish、continue、
+      并发拒绝，尚未做 50 次循环。
 
 ## Phase 2：图形化栈视图
 

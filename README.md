@@ -11,7 +11,7 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
 
 ---
 
-## 当前状态：Phase 0（环境探测与骨架）
+## 当前状态：Phase 1（真实 GDB 调试链路已打通，前端 UI 尚未接线）
 
 已完成：
 
@@ -22,25 +22,33 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
 - 公开配置 `GDB_PATH` / `PWNDBG_INIT` / `API_HOST` / `API_PORT` /
   `ALLOWED_SAMPLE_DIR`，GDB 缺失时后端仍可启动并返回 `unavailable`；
 - 内置样例 `samples/stack-basic/demo.c` 与编译脚本；
+- **Phase 1 调试链路**：
+  - 每会话一个持久 GDB/MI3 子进程（`GdbProcess` + `MIController`）；
+  - MI token 关联命令响应，`*stopped`/`*running`/退出事件独立分发；
+  - `DebugSession` 状态机 + 单会话命令串行化；
+  - `launch/run/continue/interrupt/step/next/stepi/nexti/finish` 动作；
+  - 真实快照：寄存器、GDB unwinder 栈帧、RIP 附近反汇编、RSP 窗口内存、
+    字节级 diff；
+  - `POST/GET/DELETE /api/v1/sessions...` 与
+    `WS /api/v1/sessions/{id}/stream`（`session.state` + `snapshot`）；
+  - 会话数量上限、进程组清理、启动失败/超时错误状态；
 - React + TypeScript + Vite + Tailwind + Zustand 深色 IDE 工作台骨架，
   环境面板展示真实探测结果；
 - 本机安全护栏：非 loopback 绑定默认拒绝、`Host` 白名单、
   跨站浏览器请求拒绝、CORS 收紧、子进程组超时清理；
-- 单元测试与真实环境集成测试（pytest，75 passed），其中包含真实
-  GDB/MI3 load → break main → run → stepi → 读内存 → 清理的冒烟测试；
+- 单元测试与真实环境集成测试（pytest，含真实 GDB 会话与 MI 控制器测试）；
 - 环境检查脚本在本机 0 failure / 0 warning。
 
-![Phase 0 工作台（真实探测结果）](docs/assets/workbench-phase0.png)
+![Phase 0/环境面板（真实探测结果）](docs/assets/workbench-phase0.png)
 
-> 截图由 headless Edge 打开 `http://127.0.0.1:5173` 生成；面板中的 GDB 12.1、
-> MI3、pwndbg 2026.07.29、样例 17.1 KiB 均来自后端真实探测。
+> 截图是 Phase 0 的工作台：当前前端仍只展示环境探测，尚未接线 Phase 1 的
+> 会话/快照 UI（按计划留到 Phase 2）。后端调试链路已由真实集成测试覆盖。
 
-尚未实现（Phase 1 起）：
+尚未实现（后续阶段）：
 
-- 持久 GDB/MI3 子进程、命令队列、`*stopped` 事件处理；
-- Step Instruction / Continue / Pause / Finish 的真实动作；
-- 真实 snapshot 采集（寄存器、栈帧、RSP 附近内存、RIP 反汇编）；
-- WebSocket 推送、栈内存图形视图、字节级 diff。
+- 前端工具栏与栈内存视图接入真实 session（Phase 2）；
+- breakpoint 增删 API、源码视图、变量/DWARF 语义（Phase 3/4）；
+- 前端 WebSocket 客户端与快照回放。
 
 阶段计划与验收标准见 [docs/PHASES.md](docs/PHASES.md)。
 
@@ -122,11 +130,13 @@ I/O 拖慢 pip），可用 `PWNVIZ_VENV` 覆盖。
 集成测试会真实启动 `gdb --version`、`gdb --batch --interpreter=mi3`，并在
 pwndbg 可用时真实加载它；`tests/integration/test_gdb_mi_smoke.py` 还会真实加载
 样例、命中 `main`、单步一条指令、读取寄存器/内存并确认 inferior 进程退出。
+`test_session_lifecycle.py` 通过 REST 跑完整会话（launch → 快照 → stepi → diff
+→ finish → 终止清理），`test_websocket_stream.py` 验证实时推送。
 不会用 mock 冒充调试成功。
 
 ### 7. 配置（`.env`）
 
-复制 `.env.example` 为 `.env`（该文件被 git 忽略）。Phase 0 的公开配置项：
+复制 `.env.example` 为 `.env`（该文件被 git 忽略）。公开配置项：
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
@@ -137,10 +147,13 @@ pwndbg 可用时真实加载它；`tests/integration/test_gdb_mi_smoke.py` 还�
 | `ALLOWED_SAMPLE_DIR` | `<repo>/samples` | 只允许发现该目录之下的样例 |
 | `PWNVIZ_ALLOW_REMOTE` | `0` | 显式允许非 loopback 绑定（不推荐） |
 | `PWNVIZ_ALLOWED_HOSTS` | `127.0.0.1,localhost,testserver` | `Host` 头白名单 |
+| `PWNVIZ_GDB_ARGS` | `--quiet --nx --interpreter=mi3` | 持久 GDB 启动参数（自动移除 `--batch`） |
+| `PWNVIZ_GDB_STOP_TIMEOUT_SECONDS` | `15` | 等待 `*stopped` 的预算 |
 
-可选调优项（`PWNVIZ_*`：pwndbg 开关、超时、缓存 TTL、CORS、栈窗口）见
-[.env.example](.env.example)。旧的 `PWNVIZ_GDB_BINARY` / `PWNVIZ_PWNDBG_PATH` /
-`PWNVIZ_SAMPLES_DIR` / `PWNVIZ_HOST` / `PWNVIZ_PORT` 仍作为兼容别名。
+可选调优项（`PWNVIZ_*`：pwndbg 开关、命令超时、缓存 TTL、CORS、栈窗口、
+快照上限）见 [.env.example](.env.example)。旧的 `PWNVIZ_GDB_BINARY` /
+`PWNVIZ_PWNDBG_PATH` / `PWNVIZ_SAMPLES_DIR` / `PWNVIZ_HOST` / `PWNVIZ_PORT`
+仍作为兼容别名。
 
 安全模型与审计结论见 [docs/SECURITY.md](docs/SECURITY.md) 与
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#14-安全--架构-review-记录2026-11-03)。
@@ -161,12 +174,15 @@ Pwnvis/
 │       └── types/            # 与后端 schema 对齐的 TS 类型
 ├── backend/                  # FastAPI
 │   ├── app/
-│   │   ├── api/              # health / capabilities / samples 路由
-│   │   ├── core/             # config / errors / logging / proc
-│   │   ├── debugger/         # 环境探测（Phase 1 增加 MI controller）
+│   │   ├── api/              # health / capabilities / samples / sessions / websocket
+│   │   ├── core/             # config / errors / logging / proc / security
+│   │   ├── debugger/         # environment 探测 + gdb_process / mi_controller / pwndbg_loader
+│   │   ├── sessions/         # state / session / manager
+│   │   ├── collector/        # registers / frames / memory / disassembly / snapshot
+│   │   ├── analysis/         # byte-level diff
 │   │   ├── samples/          # 样例发现
-│   │   └── schemas/          # Pydantic v2 模型
-│   └── tests/                # unit + integration
+│   │   └── schemas/          # Pydantic v2 模型（capabilities / samples / session / snapshot）
+│   └── tests/                # unit + 真实 GDB 集成测试
 ├── samples/                  # 教学 C 样例与 README
 ├── scripts/                  # bootstrap / 环境检查 / 编译 / 启动
 ├── docs/                     # ARCHITECTURE / API / DEVELOPMENT / PHASES / SECURITY
@@ -176,10 +192,10 @@ Pwnvis/
 
 ---
 
-## 架构要点（Phase 0 已确立）
+## 架构要点（已确立）
 
 1. 前端只做交互与渲染，绝不直接执行 GDB；
-2. 每个调试会话将拥有一个**长期运行**的 GDB/MI3 子进程（Phase 1），
+2. 每个调试会话拥有一个**长期运行**的 GDB/MI3 子进程，
    不会每次单步重启 GDB；
 3. 同一会话的所有动作串行化，MI 命令完成记录与 `*running`/`*stopped`
    异步事件分开处理；
@@ -206,7 +222,7 @@ Pwnvis/
 
 ---
 
-## API（Phase 0）
+## API（Phase 1）
 
 | Method | Endpoint | 说明 |
 |---|---|---|
@@ -215,6 +231,26 @@ Pwnvis/
 | GET | `/api/v1/capabilities?verify_pwndbg=true` | 额外真实加载 pwndbg 验证 |
 | GET | `/api/v1/samples` | 教学样例列表与编译状态 |
 | GET | `/api/v1/samples/{id}` | 单个样例 |
+| POST | `/api/v1/sessions` | 创建会话（`sample_id`、可选 `stop_at`、`load_pwndbg`） |
+| GET | `/api/v1/sessions/{id}` | 会话状态、PID、快照数量 |
+| POST | `/api/v1/sessions/{id}/launch` | 启动 GDB、加载 ELF、停在 `main` |
+| POST | `/api/v1/sessions/{id}/actions` | 白名单动作（continue/interrupt/stepi/nexti/step/next/finish 等） |
+| GET | `/api/v1/sessions/{id}/snapshots` | 真实快照历史 |
+| DELETE | `/api/v1/sessions/{id}` | 终止会话并清理 GDB/inferior |
+| WS | `/api/v1/sessions/{id}/stream` | `session.state` 与 `snapshot` 实时事件 |
+
+快速验证（后端启动后）：
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/api/v1/sessions \
+  -H 'Content-Type: application/json' \
+  -d '{"sample_id":"stack-basic","load_pwndbg":false}'
+# 用返回的 session_id：
+curl -s -X POST http://127.0.0.1:8000/api/v1/sessions/<id>/launch
+curl -s -X POST http://127.0.0.1:8000/api/v1/sessions/<id>/actions \
+  -H 'Content-Type: application/json' -d '{"action":"step_instruction"}'
+curl -s -X DELETE http://127.0.0.1:8000/api/v1/sessions/<id>
+```
 
 示例响应与字段说明见 [docs/API.md](docs/API.md)。
 
