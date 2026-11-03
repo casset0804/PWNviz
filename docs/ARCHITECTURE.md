@@ -98,12 +98,13 @@ src/
 │   ├── DisassemblyView/       快照反汇编、RIP 高亮、断点 marker、点击选择
 │   ├── StackMemoryView/       地址/8 byte cells/qword/ASCII/RSP/RBP/changed/unknown
 │   ├── RegisterPanel/         真实寄存器 + changed before→after
-│   ├── MemoryInspector/       选中 byte 的地址、值、qword、ASCII、diff
+│   ├── VariablesPanel/        DWARF locals/args、array/struct/pointer/string
+│   ├── MemoryInspector/       选中 byte 的地址、值、qword、ASCII、pointer target
 │   ├── DiffPanel/             寄存器与绝对地址字节级 diff
 │   ├── ExplanationPanel/      有限规则 + 实测 before/after，不模拟未知指令
 │   ├── EnvironmentPanel/      真实探测结果（GDB/pwndbg/样例/警告）
 │   ├── DebugLogPanel/         GDB/MI 输出、WS/action 事件
-│   └── BottomDock/            Memory / Diff / Explanation / Log / Environment
+│   └── BottomDock/            Memory / Variables / Diff / Explanation / Log / Environment
 ├── hooks/useCapabilities.ts   探测请求、verify pwndbg、错误状态
 ├── hooks/useSamples.ts        样例列表
 ├── lib/address.ts             地址解析/格式化/比较（BigInt，无 Number 地址）
@@ -145,6 +146,7 @@ app/collector/
 ├── frames.py           -stack-list-frames（GDB unwinder，不假设 RBP）
 ├── memory.py           -data-read-memory-bytes（64B 分块，unreadable 容错）
 ├── disassembly.py      -data-disassemble -s ... -e ... -- 1
+├── variables.py        GDB variable objects：locals/args/types/children/pointer target
 └── snapshot.py         组装不可变 Snapshot
 
 app/analysis/diff.py    寄存器差异 + 按绝对地址的 stack byte diff
@@ -230,7 +232,12 @@ sequenceDiagram
 - 栈帧：GDB unwinder；
 - 内存：GDB 读取的原始字节；
 - 反汇编：GDB `-data-disassemble`；
-- 变量名/类型：仅在 DWARF/GDB 变量对象可用时展示（Phase 4）；
+- 变量名/类型/值/地址：GDB/MI variable objects，要求 DWARF；
+  `source=dwarf, confidence=debug-info`；array/struct children 来自
+  `-var-list-children`；optimized out/synthetic/register 明确标记；
+- pointer target：单层、最多 64B 的 GDB 内存读取，`target_source=gdb-memory`；
+  不自动跟随指针链，不超出读取上限；
+- 无 DWARF：变量列表为空，raw stack/registers 不受影响；
 - 解释：仅基于 before/after 实测，规则未覆盖时只陈述变化。
 
 ## 4. 前后端协议

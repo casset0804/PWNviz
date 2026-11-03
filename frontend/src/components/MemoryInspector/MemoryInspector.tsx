@@ -6,6 +6,7 @@ import { StatusBadge } from "../common/StatusBadge";
 export function MemoryInspector() {
   const snapshot = useDebugStore((state) => state.snapshot);
   const selectedAddress = useDebugStore((state) => state.selectedByteAddress);
+  const pointerTarget = useDebugStore((state) => state.pointerTarget);
   const selectedInstructionAddress = useDebugStore(
     (state) => state.selectedInstructionAddress,
   );
@@ -38,6 +39,53 @@ export function MemoryInspector() {
         <p className="font-mono text-[11px] text-slate-600">
           No snapshot yet. Launch a session and stop at main.
         </p>
+      ) : null}
+
+      {pointerTarget ? (
+        <section className="rounded border border-sky-500/30 bg-sky-500/5 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] uppercase tracking-[0.14em] text-sky-300/80">
+              pointer target
+            </span>
+            <span className="font-mono text-[11px] text-slate-200">
+              {pointerTarget.variableName}: {pointerTarget.type}
+            </span>
+            <StatusBadge
+              tone={
+                pointerTarget.readable === true
+                  ? "ok"
+                  : pointerTarget.readable === false
+                    ? "error"
+                    : "idle"
+              }
+            >
+              {pointerTarget.readable === true
+                ? "readable"
+                : pointerTarget.readable === false
+                  ? "invalid / unreadable"
+                  : "not read (limit)"}
+            </StatusBadge>
+          </div>
+          <div className="mt-2 grid gap-2 md:grid-cols-2">
+            <div className="font-mono text-[10px] text-slate-400">
+              address: {pointerTarget.address ?? "unavailable"}
+              <br />
+              source: {pointerTarget.source ?? "unknown"}
+            </div>
+            <div className="min-w-0 font-mono text-[10px] text-slate-400">
+              string: {pointerTarget.stringValue ?? "—"}
+            </div>
+          </div>
+          {pointerTarget.bytes ? (
+            <div className="mt-2 break-all font-mono text-[10px] text-slate-300">
+              bytes: {pointerTarget.bytes}
+            </div>
+          ) : null}
+          <p className="mt-1 text-[9px] text-slate-500">
+            Pointer target reads are capped at 64 bytes by the backend; this is not an
+            unbounded dereference.
+          </p>
+        </section>
       ) : null}
 
       {cell ? (

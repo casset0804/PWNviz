@@ -1,7 +1,8 @@
 # 开发阶段与验收计划
 
-每一阶段结束时项目必须仍可启动。当前仓库状态：**Phase 0/1/2 已完成，Phase 3
-实时调试工作台已完成并通过完整真实 GDB UI E2E**；断点增删/源码/DWARF 留到后续。
+每一阶段结束时项目必须仍可启动。当前仓库状态：**Phase 0/1/2/3 已完成，Phase 4
+变量语义已完成核心部分（DWARF locals/参数、array/struct/pointer/string、
+optimized-out、bounded pointer target）**；源码视图与更深层容器语义待后续。
 
 ## Phase 0：环境探测与骨架
 
@@ -31,7 +32,7 @@
 - [x] 前端能显示 GDB 版本、MI3 支持、pwndbg 状态；
 - [x] 缺少 GDB / pwndbg 时警告可读，不回退为假数据；
 - [x] 后端与前端可分别启动（`scripts/dev_backend.sh` / `npm run dev`）；
-- [x] pytest 在真实 WSL 环境中通过（当前 111 passed，含真实 MI3 冒烟与会话测试）；
+- [x] pytest 在真实 WSL 环境中通过（当前 115 passed，含真实 MI3 冒烟与会话测试）；
 - [x] `scripts/check_environment.sh` 本机 0 failure / 0 warning；
 - [x] 非 loopback 绑定默认拒绝，跨站浏览器请求与非法 Host 被拒绝；
 - [x] 探测超时不会留下孙进程（进程组 kill 测试通过）。
@@ -125,12 +126,18 @@
       Finish → Continue Exited → Restart，页面不刷新；
 - [ ] 断点增删 API、源码视图。
 
-## Phase 4：教学语义增强
+## Phase 4：教学语义增强（核心变量语义已完成）
 
-- DWARF 局部变量、类型、地址、值；
-- 指针目标；
-- 指令解释规则（仅基于真实 before/after）；
-- 每个语义标签标注来源：GDB / DWARF / analyzer / heuristic。
+- [x] DWARF local/参数、类型、地址、值、location kind；
+- [x] array / struct / pointer / string children；
+- [x] optimized out / synthetic / register / unavailable；
+- [x] pointer target 单层、有界读取；invalid/unreadable 展示；
+- [x] 每个语义节点标注 `source=dwarf`、`confidence=debug-info`；
+- [x] 无 DWARF 时 raw stack/register 仍完整；
+- [x] 测试矩阵：-g -O0、无 debug、-O2、-fomit-frame-pointer、复杂类型、
+      optimized out；
+- [ ] 嵌套指针链自动跟随/更复杂 C++ 容器；
+- [ ] 源码行级变量作用域与多 frame 变量树。
 
 ## Phase 5：PWN 教学扩展
 

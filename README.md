@@ -11,7 +11,7 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
 
 ---
 
-## 当前状态：Phase 3（实时调试工作台）
+## 当前状态：Phase 3 实时工作台 + Phase 4 变量语义（部分）
 
 已完成：
 
@@ -55,17 +55,26 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
     ret / leave / nop，结合 before/after 寄存器与内存差异；未知指令只显示
     “已执行，请观察状态变化”；
   - 不把 RBP 讲成固定栈底，也不把 RSP–RBP 空间硬编码为局部变量；
+- **Phase 4 变量语义（部分）**：
+  - GDB/MI variable objects 识别 local/参数、类型、值、地址和 location kind；
+  - 支持 array / struct / pointer / string，children 树；
+  - 每个节点带 `source="dwarf"`、`confidence="debug-info"`；
+  - pointer target 仅做单层、最多 64 字节读取；invalid/unreadable 明确展示；
+  - 无 DWARF 时 variables 为空并给 warning，raw stack/register 保持完整；
+  - 不耦合 pwndbg 私有模块；无 debug 信息时不做变量猜测；
 - React + TypeScript + Vite + Tailwind + Zustand 深色 IDE 工作台；
 - 本机安全护栏：非 loopback 绑定默认拒绝、HTTP/WS 非 loopback 客户端中间件、
   `Host` 白名单、跨站浏览器请求拒绝、CORS 收紧、子进程组超时清理；
 - 生命周期清理：DELETE/取消/退出/reader 失败均回收 GDB，WebSocket 队列有界；
-- 单元测试与真实环境集成测试（pytest 111 passed，含真实 GDB 会话与 MI 控制器测试）；
+- 单元测试与真实环境集成测试（pytest 115 passed，含真实 GDB 会话与 MI 控制器测试、变量矩阵）；
 - CDP E2E：`scripts/ui_smoke.mjs` 真实跑通
   main → StepI → Step Into add_numbers → RSP 变化 → Finish → Continue 退出 →
-  Restart，页面不刷新；前端单测 24 passed；
+  Restart，页面不刷新；前端单测 25 passed；
 - 环境检查脚本在本机 0 failure / 0 warning。
 
 ![Phase 3 工作台（真实 GDB 会话）](docs/assets/workbench-phase2.png)
+
+![Variables / DWARF 语义](docs/assets/workbench-variables.png)
 
 > 截图来自真实 GDB 会话：RSP、RBP、RIP 与栈字节均来自后端 Snapshot；
 > 状态栏与断点来自 WebSocket 事件；高亮的 `0a` 是 StepI 后 diff 检测到的真实
@@ -73,7 +82,8 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
 
 尚未实现（后续阶段）：
 
-- 断点增删 API、源码视图、DWARF 变量/类型语义（Phase 4）；
+- 断点增删 API、源码视图；
+- 更完整的 DWARF 类型/嵌套指针/容器语义；
 - 快照历史时间轴回放；
 - 更完整的指令解释规则（当前只覆盖有限常用指令）。
 

@@ -93,6 +93,33 @@ export interface SnapshotDiff {
   window_changed: boolean;
 }
 
+export type VariableLocationKind =
+  | "memory"
+  | "register"
+  | "optimized_out"
+  | "unavailable"
+  | "unknown";
+
+export interface VariableNode {
+  name: string;
+  type: string;
+  value: string | null;
+  address: string | null;
+  location_kind: VariableLocationKind;
+  source: string;
+  confidence: string;
+  kind: string;
+  is_argument: boolean;
+  frame_level: number;
+  children: VariableNode[];
+  string_value: string | null;
+  pointer_target: string | null;
+  target_readable: boolean | null;
+  target_bytes: string | null;
+  target_string: string | null;
+  target_source: string | null;
+}
+
 export interface Snapshot {
   session_id: string;
   snapshot_id: number;
@@ -108,6 +135,8 @@ export interface Snapshot {
   disassembly: DisassemblyLine[];
   stack: StackWindow;
   diff: SnapshotDiff;
+  variables: VariableNode[];
+  variables_available: boolean;
   warnings: string[];
 }
 

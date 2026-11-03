@@ -475,9 +475,37 @@ GDB 启动/命令失败 → `502 debugger_error`，会话进入 `ERROR` 并回�
     ],
     "window_changed": false
   },
+  "variables": [
+    {
+      "name": "local_int",
+      "type": "int",
+      "value": "42",
+      "address": "0x00007fffffffe234",
+      "location_kind": "memory",
+      "source": "dwarf",
+      "confidence": "debug-info",
+      "kind": "scalar",
+      "is_argument": false,
+      "frame_level": 0,
+      "children": [],
+      "string_value": null,
+      "pointer_target": null,
+      "target_readable": null,
+      "target_bytes": null,
+      "target_string": null,
+      "target_source": null
+    }
+  ],
+  "variables_available": true,
   "warnings": []
 }
 ```
+
+> `variables_available=false` 表示没有 DWARF 变量信息；此时 raw stack 和
+> registers 仍然完整。`source=dwarf` / `confidence=debug-info` 表示类型、值和
+> 地址来自 GDB variable objects；`target_source=gdb-memory` 表示 pointer target
+> 字节来自单次、最多 64 字节的 GDB 内存读取。`kind` 是从 GDB type 语法派生的
+> 展示分类，不是从 raw qword 猜测的变量。
 
 > 示例来自本机真实会话，`rows`/`disassembly` 为简洁只保留相关行。
 > 完整快照包含 `rsp-0x80 .. rsp+0x180` 的 64 行（上限受配置约束）。

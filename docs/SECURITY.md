@@ -64,6 +64,9 @@ PWNviz 第一版是**本机单用户教学工具**：
 - 变量名、返回地址等语义标注未在 Phase 1 生成，不会把未知 qword 冒充语义。
 - `debugger.output` 的 GDB/MI 文本只作为转义后的纯文本显示，不解析为指令、
   不执行；前端日志上限 200 条，后端 WebSocket 队列有界。
+- 变量语义只在 DWARF/GDB variable objects 可用时展示；无 debug info 不猜测变量；
+  pointer target 只做单层读取，单指针最多 64 字节、最多 16 个目标，目标不可读
+  明确显示 invalid/unreadable；不自动跟随指针链。
 
 ## Phase 1 仍需注意
 

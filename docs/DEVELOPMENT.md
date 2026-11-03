@@ -502,7 +502,7 @@ changed_bytes = [{address: 0x7fffffffe274, before: 00, after: 0a}]
 ### 15.4 测试结果
 
 ```text
-111 passed in 53.04s
+115 passed in 151.41s
 ```
 
 核心真实集成测试：
@@ -585,7 +585,7 @@ tests/unit/test_subscriber_backpressure.py
 - 新增失败路径测试：
   `tests/unit/test_mi_reader_failure.py`、`tests/unit/test_session_failure.py`，
   以及 `test_continue_to_exit_and_cleanup` 中“退出后自动释放 GDB”断言。
-- 真实 GDB 集成测试未删除、未改为 mock；当前 111 passed。
+- 真实 GDB 集成测试未删除、未改为 mock；当前 115 passed。
 
 ## 16. Phase 2 前端可视化实测（2026-11-03）
 
@@ -651,13 +651,13 @@ npm test
 ✓ src/lib/explain.test.ts (11 tests)
 ✓ src/lib/address.test.ts (6 tests)
 ✓ src/lib/snapshot.test.ts (5 tests)
-✓ src/stores/debugStore.test.ts (2 tests)
+✓ src/stores/debugStore.test.ts (3 tests)
 Test Files 4 passed (4)
-Tests 24 passed (24)
+Tests 25 passed (25)
 
 tsc --noEmit && vite build
 ✓ 40 modules transformed
-dist/assets/index-*.js 287.55 kB
+dist/assets/index-*.js 295.47 kB
 ```
 
 测试覆盖：64-bit BigInt 精确性、地址格式化/比较/行内 offset、RSP/RBP marker、
@@ -707,8 +707,8 @@ DELETE 失败保留 session、push/pop/mov/sub rsp/add rsp/call/ret/leave/nop �
 
 ### 17.3 验证
 
-- 后端：`111 passed, 1 warning`（真实 GDB 集成测试未删除、未 mock 成功路径）；
-- 前端：`24 passed`，`tsc --noEmit && vite build` 成功；
+- 后端：`115 passed, 1 warning`（真实 GDB 集成测试未删除、未 mock 成功路径）；
+- 前端：`25 passed`，`tsc --noEmit && vite build` 成功；
 - 真实 UI E2E 仍通过 Run → StepI → changed cell → RSP scroll → Terminate
   （见 16.2；本轮后端中间件未改变 loopback 访问路径）。
 
@@ -782,9 +782,9 @@ Debug Log 的 GDB/MI 输出、Explanation 面板同时验证。
 
 ### 18.4 测试
 
-- 后端：`111 passed, 1 warning`（真实 GDB 集成测试保留；WS 测试新增
+- 后端：`115 passed, 1 warning`（真实 GDB 集成测试保留；WS 测试新增
   `breakpoints.updated` 与 `debugger.output` 断言）；
-- 前端：`24 passed`；`tsc --noEmit && vite build` 成功；
+- 前端：`25 passed`；`tsc --noEmit && vite build` 成功；
 - 说明：Step Into 一次可能执行多条机器指令，因此 Explanation 在无法把
   before/after 归因于单条指令时只显示“已执行，请观察状态变化”，不猜测。
 
@@ -820,8 +820,67 @@ Debug Log 的 GDB/MI 输出、Explanation 面板同时验证。
 
 ### 19.3 验证
 
-- 后端：`111 passed, 1 warning`（真实 GDB 集成测试保留）；
-- 前端：`24 passed`；`tsc --noEmit && vite build` 成功；
+- 后端：`115 passed, 1 warning`（真实 GDB 集成测试保留）；
+- 前端：`25 passed`；`tsc --noEmit && vite build` 成功；
 - 完整 UI E2E 仍通过（默认 `:5173` / `:8000`）：main → StepI → Step Into →
   RSP `e270→e260` → Finish → RSP `e270` → Continue **Exited** → Restart；
   Breakpoint、Debug Log、stale/duplicate 处理均验证。
+
+## 20. 变量语义识别（DWARF / GDB MI，2026-11-03）
+
+### 20.1 实现
+
+- 新增 `VariableCollector`，仅使用 GDB/MI public variable objects，不 import
+  pwndbg 私有模块：
+  - `-stack-list-variables --all-values`
+  - `-var-create`
+  - `-var-info-path-expression`
+  - `-var-list-children --all-values`
+  - `-data-evaluate-expression &(...)`（地址）
+  - `-var-delete`（每张快照清理 variable objects）
+- 节点字段：`name`、`type`、`value`、`address`、`location_kind`、`source`、
+  `confidence`、`kind`、`is_argument`、`children`、`string_value`、
+  `pointer_target`、`target_readable`、`target_bytes`、`target_string`、
+  `target_source`。
+- `location_kind`：`memory`、`register`、`optimized_out`、`unavailable`、
+  `unknown`。
+- 来源边界：
+  - 类型/值/地址：`source="dwarf"`、`confidence="debug-info"`；
+  - 指针目标字节：`target_source="gdb-memory"`（单指针最多 64B，最多 16 个
+    指针读取；总读取有上限）；
+  - 数组/struct 子节点来自 GDB `-var-list-children`；
+  - `kind` 是从 GDB type 语法派生的展示分类，不是从 raw qword 猜测的变量语义。
+- 无 DWARF：`variables_available=false`、variables 为空、给出 warning；
+  raw stack/registers 仍然完整（变量采集在 raw memory 之后执行）。
+- 限制：最多 64 个根、128 个子节点、深度 3；超限截断并给 warning。
+- 前端新增 Variables 标签：树形展示、参数/local、类型、值、地址、location、
+  source/confidence、字符串、数组/struct 子节点；点击 pointer target 在
+  Memory Inspector 展示有界目标字节，目标不可读显示 invalid/unreadable。
+- 未自动解引用指针链；只对单层目标做有界读取。
+
+### 20.2 测试矩阵（真实 GDB）
+
+`backend/tests/integration/test_variables.py`：
+
+- `-g -O0 -fno-omit-frame-pointer`：local/参数/string/array/struct/pointer/
+  invalid pointer；
+- 无 `-g`：无变量语义，raw stack/registers 保持；
+- `-g -O2`：optimized out / synthetic pointer / 子节点；
+- `-g -O2 -fomit-frame-pointer`：unwinder frames + 变量处理，不假定 RBP 为帧指针；
+- 每个节点断言 `source=dwarf`、`confidence=debug-info`；
+- pointer target 64B 上限和 invalid target（`0x1`）不可读。
+
+### 20.3 验证
+
+- 后端：`115 passed, 1 warning`（真实 GDB；含 4 个变量矩阵测试）；
+- 前端：`25 passed`；`tsc --noEmit && vite build` 成功（295.47 kB）；
+- 前端 E2E 增加 Variables 标签与 provenance 断言；
+- 变量 UI 截图：[assets/workbench-variables.png](assets/workbench-variables.png)。
+
+### 20.4 明确证据边界
+
+- GDB 实际确认：变量存在、类型、值、地址/location、children、optimized-out；
+- GDB 内存实际读取：pointer target bytes、string 内容、可读/不可读状态；
+- PWNviz 推断：仅将 GDB type 分类为 pointer/array/struct/string 的显示 kind；
+  不从 raw memory 猜测变量名或作用域。
+- 无 debug info 时没有“猜测变量”；只保留 raw 内存/寄存器视图。

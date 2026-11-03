@@ -23,6 +23,9 @@ const APP_URL = process.env.PWNVIZ_APP_URL ?? "http://127.0.0.1:5173";
 const API_URL = (process.env.PWNVIZ_API_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 const CDP_URL = (process.env.PWNVIZ_CDP_URL ?? "http://127.0.0.1:9223").replace(/\/$/, "");
 const SHOT_PATH = resolve(process.env.PWNVIZ_SHOT ?? "docs/assets/workbench-phase2.png");
+const VAR_SHOT_PATH = resolve(
+  process.env.PWNVIZ_VAR_SHOT ?? "docs/assets/workbench-variables.png",
+);
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 function assert(condition, message) {
@@ -182,6 +185,24 @@ async function main() {
     const restartDisabled = await client.evaluate(
       `document.querySelector('[data-testid="restart"]')?.disabled ?? null`,
     );
+
+    await client.evaluate(`document.querySelector('[data-testid="tab-variables"]').click()`);
+    await waitFor(
+      client,
+      "DWARF variables",
+      `document.querySelectorAll('[data-testid="variable-row"]').length > 0`,
+      20_000,
+    );
+    const variablesText = await client.evaluate(
+      `document.querySelector('[data-testid="variables-panel"]')?.textContent ?? ''`,
+    );
+    assert(variablesText.includes("dwarf") && variablesText.includes("debug-info"), "variable provenance missing");
+    const variablesShot = await client.send("Page.captureScreenshot", {
+      format: "png",
+      captureBeyondViewport: false,
+    });
+    writeFileSync(VAR_SHOT_PATH, Buffer.from(variablesShot.data, "base64"));
+    await client.evaluate(`document.querySelector('[data-testid="tab-memory"]').click()`);
 
     // Debug Log must contain live GDB/MI output events, not just local UI actions.
     await client.evaluate(`document.querySelector('[data-testid="tab-log"]').click()`);
@@ -467,6 +488,9 @@ async function main() {
           after: { ...after, changedLabels: after.changedLabels.length },
           breakpoints: breakpointText,
           debugLogHasGdb: debugLogText.includes("gdb"),
+          variablesHaveProvenance:
+            variablesText.includes("dwarf") && variablesText.includes("debug-info"),
+          variablesScreenshot: VAR_SHOT_PATH,
           restartDisabled,
           rspVisible,
           inspector,

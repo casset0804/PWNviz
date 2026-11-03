@@ -8,6 +8,7 @@ from app.collector.disassembly import DisassemblyCollector
 from app.collector.frames import FrameCollector
 from app.collector.memory import StackMemoryCollector
 from app.collector.registers import RegisterCollector
+from app.collector.variables import VariableCollector
 from app.core.config import Settings
 from app.debugger.environment import detect_architecture
 from app.debugger.mi_controller import MIController
@@ -24,6 +25,7 @@ class SnapshotCollector:
         self.frames = FrameCollector(settings.snapshot_max_frames)
         self.memory = StackMemoryCollector(settings)
         self.disassembly = DisassemblyCollector(settings)
+        self.variables = VariableCollector(settings)
 
     async def collect(
         self,
@@ -76,6 +78,21 @@ class SnapshotCollector:
         if stack is None:
             stack = StackWindow()
 
+        variables = []
+        variables_available = False
+        try:
+            variables, variables_available, variable_warnings = (
+                await self.variables.collect(
+                    controller,
+                    has_debug_file=any(frame.file for frame in frames),
+                )
+            )
+            warnings.extend(variable_warnings)
+        except Exception as exc:
+            warnings.append(
+                f"Variable collection failed: {type(exc).__name__}: {exc}"
+            )
+
         diff = MemoryDiffEngine.compute(previous, registers, stack)
         MemoryDiffEngine.apply_highlights(diff, stack)
 
@@ -100,5 +117,7 @@ class SnapshotCollector:
             disassembly=disassembly,
             stack=stack,
             diff=diff,
+            variables=variables,
+            variables_available=variables_available,
             warnings=unique_warnings,
         )

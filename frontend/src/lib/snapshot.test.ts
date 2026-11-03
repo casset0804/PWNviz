@@ -62,6 +62,8 @@ function fixtureSnapshot(
           : [],
       window_changed: false,
     },
+    variables: [],
+    variables_available: false,
     warnings: [],
   };
 }

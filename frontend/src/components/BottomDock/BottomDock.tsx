@@ -5,6 +5,7 @@ import { DiffPanel } from "../DiffPanel/DiffPanel";
 import { EnvironmentPanel } from "../EnvironmentPanel/EnvironmentPanel";
 import { ExplanationPanel } from "../ExplanationPanel/ExplanationPanel";
 import { MemoryInspector } from "../MemoryInspector/MemoryInspector";
+import { VariablesPanel } from "../VariablesPanel/VariablesPanel";
 
 interface BottomDockProps {
   capabilities: Capabilities | null;
@@ -18,6 +19,7 @@ interface BottomDockProps {
 
 const TABS: Array<{ id: BottomTab; label: string; meta: string }> = [
   { id: "memory", label: "Memory Inspector", meta: "selected byte" },
+  { id: "variables", label: "Variables", meta: "DWARF locals" },
   { id: "diff", label: "Diff", meta: "byte + register" },
   { id: "explanation", label: "Explanation", meta: "measured effects" },
   { id: "log", label: "Debug Log", meta: "session events" },
@@ -85,6 +87,7 @@ export function BottomDock({
 
       <div className="min-h-0 flex-1 overflow-auto">
         {bottomTab === "memory" ? <MemoryInspector /> : null}
+        {bottomTab === "variables" ? <VariablesPanel /> : null}
         {bottomTab === "diff" ? <DiffPanel /> : null}
         {bottomTab === "explanation" ? <ExplanationPanel /> : null}
         {bottomTab === "log" ? <DebugLogPanel /> : null}

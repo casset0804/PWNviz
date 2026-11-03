@@ -9,9 +9,16 @@ import type {
   SessionInfo,
   Snapshot,
   StreamEvent,
+  VariableNode,
 } from "../types/debug";
 
-export type BottomTab = "environment" | "memory" | "diff" | "explanation" | "log";
+export type BottomTab =
+  | "environment"
+  | "memory"
+  | "variables"
+  | "diff"
+  | "explanation"
+  | "log";
 export type StreamStatus = "closed" | "connecting" | "open" | "reconnecting";
 export type LogLevel = "info" | "event" | "error" | "gdb";
 
@@ -27,6 +34,16 @@ export interface ScrollTarget {
   nonce: number;
 }
 
+export interface PointerTargetView {
+  variableName: string;
+  type: string;
+  address: string | null;
+  readable: boolean | null;
+  bytes: string | null;
+  stringValue: string | null;
+  source: string | null;
+}
+
 interface DebugStore {
   selectedSampleId: string | null;
   session: SessionInfo | null;
@@ -39,6 +56,7 @@ interface DebugStore {
   lastOutputSeq: number;
   selectedByteAddress: string | null;
   selectedInstructionAddress: string | null;
+  pointerTarget: PointerTargetView | null;
   scrollTarget: ScrollTarget | null;
   animationsEnabled: boolean;
   streamStatus: StreamStatus;
@@ -53,6 +71,7 @@ interface DebugStore {
   toggleAnimations: () => void;
   selectByte: (address: string) => void;
   selectInstruction: (address: string) => void;
+  jumpToPointer: (node: VariableNode) => void;
   requestScroll: (address: string) => void;
   appendLog: (level: LogLevel, message: string) => void;
 
@@ -174,6 +193,7 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
   lastOutputSeq: 0,
   selectedByteAddress: null,
   selectedInstructionAddress: null,
+  pointerTarget: null,
   scrollTarget: null,
   animationsEnabled: readAnimationPreference(),
   streamStatus: "closed",
@@ -214,6 +234,25 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
       selectedByteAddress: null,
     }),
 
+  jumpToPointer: (node) => {
+    const target = node.pointer_target;
+    set({
+      pointerTarget: {
+        variableName: node.name,
+        type: node.type,
+        address: target,
+        readable: node.target_readable,
+        bytes: node.target_bytes,
+        stringValue: node.target_string,
+        source: node.target_source,
+      },
+      selectedByteAddress: target,
+      selectedInstructionAddress: null,
+      bottomTab: "memory",
+      scrollTarget: target ? { address: target, nonce: Date.now() } : null,
+    });
+  },
+
   requestScroll: (address) =>
     set({ scrollTarget: { address, nonce: Date.now() } }),
 
@@ -246,6 +285,7 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
         lastOutputSeq: 0,
         selectedByteAddress: null,
         selectedInstructionAddress: null,
+        pointerTarget: null,
         scrollTarget: null,
       });
       window.history.replaceState(null, "", `?sessionId=${encodeURIComponent(session.session_id)}`);
@@ -325,6 +365,7 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
         lastOutputSeq: 0,
         selectedByteAddress: null,
         selectedInstructionAddress: null,
+        pointerTarget: null,
         scrollTarget: null,
         bottomTab: "memory",
       });
@@ -383,6 +424,7 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
       lastOutputSeq: 0,
       selectedByteAddress: null,
       selectedInstructionAddress: null,
+      pointerTarget: null,
       scrollTarget: null,
       streamStatus: "closed",
       busy: false,
@@ -426,6 +468,7 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
       lastOutputSeq: 0,
       selectedByteAddress: null,
       selectedInstructionAddress: null,
+      pointerTarget: null,
       scrollTarget: null,
       streamStatus: "closed",
       busy: false,
@@ -500,6 +543,7 @@ function applySnapshot(snapshot: Snapshot): void {
     history,
     debuggerState: effectiveState,
     error: effectiveState === "STOPPED" ? null : current.error,
+    pointerTarget: null,
     session: current.session
       ? {
           ...current.session,

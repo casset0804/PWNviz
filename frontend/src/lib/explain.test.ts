@@ -78,6 +78,8 @@ function snapshot(
       changed_bytes: changedBytes,
       window_changed: false,
     },
+    variables: [],
+    variables_available: false,
     warnings: [],
   };
 }

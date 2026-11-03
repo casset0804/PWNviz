@@ -6,6 +6,8 @@ never lose precision by parsing them as Number.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -72,6 +74,35 @@ class SnapshotDiff(BaseModel):
     window_changed: bool = False
 
 
+class VariableNode(BaseModel):
+    """One DWARF-backed variable in the selected frame.
+
+    ``source``/``confidence`` make the evidence boundary explicit: values and
+    types here come from GDB's debug-info-backed variable objects, while
+    ``target_*`` fields are bounded reads of the pointed-to memory.
+    """
+
+    name: str
+    type: str
+    value: str | None = None
+    address: str | None = None
+    location_kind: Literal[
+        "memory", "register", "optimized_out", "unavailable", "unknown"
+    ] = "unknown"
+    source: str = "dwarf"
+    confidence: str = "debug-info"
+    kind: str = "scalar"
+    is_argument: bool = False
+    frame_level: int = 0
+    children: list["VariableNode"] = Field(default_factory=list)
+    string_value: str | None = None
+    pointer_target: str | None = None
+    target_readable: bool | None = None
+    target_bytes: str | None = None
+    target_string: str | None = None
+    target_source: str | None = None
+
+
 class Snapshot(BaseModel):
     session_id: str
     snapshot_id: int
@@ -87,4 +118,6 @@ class Snapshot(BaseModel):
     disassembly: list[DisassemblyItem] = Field(default_factory=list)
     stack: StackWindow = Field(default_factory=StackWindow)
     diff: SnapshotDiff = Field(default_factory=SnapshotDiff)
+    variables: list[VariableNode] = Field(default_factory=list)
+    variables_available: bool = False
     warnings: list[str] = Field(default_factory=list)
