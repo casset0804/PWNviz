@@ -204,6 +204,61 @@ async function main() {
     writeFileSync(VAR_SHOT_PATH, Buffer.from(variablesShot.data, "base64"));
     await client.evaluate(`document.querySelector('[data-testid="tab-memory"]').click()`);
 
+    // Layout polish: collapsing side panels must give Stack Canvas more width;
+    // the inspector dock must collapse/expand without changing selection.
+    const stackWidthBefore = await client.evaluate(
+      `document.querySelector('[data-testid="stack-canvas"]')?.getBoundingClientRect().width ?? 0`,
+    );
+    await client.evaluate(`document.querySelector('[data-testid="toggle-disasm"]').click()`);
+    await waitFor(
+      client,
+      "disassembly rail",
+      `Boolean(document.querySelector('[data-testid="panel-rail-left"]'))`,
+      5_000,
+    );
+    const stackWidthAfter = await client.evaluate(
+      `document.querySelector('[data-testid="stack-canvas"]')?.getBoundingClientRect().width ?? 0`,
+    );
+    assert(
+      stackWidthAfter > stackWidthBefore,
+      `collapsing disassembly did not expand stack (${stackWidthBefore} -> ${stackWidthAfter})`,
+    );
+    await client.evaluate(`document.querySelector('[data-testid="toggle-disasm"]').click()`);
+    await waitFor(
+      client,
+      "disassembly restored",
+      `document.querySelectorAll('[data-testid="disassembly-line"]').length > 0`,
+      5_000,
+    );
+    await client.evaluate(`document.querySelector('[data-testid="toggle-registers"]').click()`);
+    await waitFor(
+      client,
+      "register rail",
+      `Boolean(document.querySelector('[data-testid="panel-rail-right"]'))`,
+      5_000,
+    );
+    await client.evaluate(`document.querySelector('[data-testid="toggle-registers"]').click()`);
+    await waitFor(
+      client,
+      "registers restored",
+      `Boolean(document.querySelector('[data-testid="register-rip"]'))`,
+      5_000,
+    );
+    await client.evaluate(`document.querySelector('[data-testid="dock-toggle"]').click()`);
+    await waitFor(
+      client,
+      "dock collapsed",
+      `(document.querySelector('[data-testid="bottom-dock"]')?.getBoundingClientRect().height ?? 999) < 40`,
+      5_000,
+    );
+    await client.evaluate(`document.querySelector('[data-testid="dock-toggle"]').click()`);
+    await waitFor(
+      client,
+      "dock expanded",
+      `(document.querySelector('[data-testid="bottom-dock"]')?.getBoundingClientRect().height ?? 0) > 40`,
+      5_000,
+    );
+
     // Debug Log must contain live GDB/MI output events, not just local UI actions.
     await client.evaluate(`document.querySelector('[data-testid="tab-log"]').click()`);
     await waitFor(
@@ -491,6 +546,7 @@ async function main() {
           variablesHaveProvenance:
             variablesText.includes("dwarf") && variablesText.includes("debug-info"),
           variablesScreenshot: VAR_SHOT_PATH,
+          layoutCollapse: { stackWidthBefore, stackWidthAfter },
           restartDisabled,
           rspVisible,
           inspector,

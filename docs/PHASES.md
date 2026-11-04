@@ -122,6 +122,8 @@ optimized-out、bounded pointer target）**；源码视图与更深层容器语�
 - [x] Debug Log 展示真实 GDB/MI 输出；
 - [x] Explanation：push/pop/mov/sub rsp/add rsp/call/ret/leave/nop，
       仅结合真实 before/after；未知指令不猜测；
+- [x] 视觉语言：石墨色低饱和 surface、语义色 + 文字标签、22px 栈行、
+      RSP 自动居中、左右/Bottom Dock 折叠、1280×720 与 reduce-motion；
 - [x] 完整 E2E：main → StepI → Step Into add_numbers → RSP 变化 →
       Finish → Continue Exited → Restart，页面不刷新；
 - [ ] 断点增删 API、源码视图。

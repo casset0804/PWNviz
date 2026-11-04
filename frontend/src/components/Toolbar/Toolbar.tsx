@@ -1,6 +1,5 @@
 import type { SampleInfo } from "../../types/api";
 import { useDebugStore } from "../../stores/debugStore";
-import { StatusBadge, type Tone } from "../common/StatusBadge";
 
 type ConnectionState = "checking" | "online" | "offline";
 
@@ -11,22 +10,19 @@ interface ToolbarProps {
 }
 
 const CONNECTION_LABEL: Record<ConnectionState, string> = {
-  checking: "probing host",
-  online: "backend online",
-  offline: "backend offline",
+  checking: "probing",
+  online: "backend",
+  offline: "offline",
 };
 
-function stateTone(state: string): Tone {
-  if (state === "STOPPED" || state === "READY") return "ok";
-  if (state === "RUNNING" || state === "INITIALIZING") return "info";
-  if (state === "ERROR") return "error";
-  if (state === "EXITED" || state === "TERMINATED") return "warn";
-  return "idle";
+function connectionColor(connection: ConnectionState): string {
+  if (connection === "online") return "bg-emerald-400";
+  if (connection === "checking") return "bg-sky-400";
+  return "bg-rose-400";
 }
 
 interface ActionButtonProps {
   label: string;
-  shortcut?: string;
   onClick: () => void;
   disabled: boolean;
   testId: string;
@@ -36,7 +32,6 @@ interface ActionButtonProps {
 
 function ActionButton({
   label,
-  shortcut,
   onClick,
   disabled,
   testId,
@@ -50,14 +45,48 @@ function ActionButton({
       onClick={onClick}
       disabled={disabled}
       title={title ?? label}
-      className={`rounded border px-2.5 py-1 font-mono text-[11px] transition-colors ${
+      className={`h-6 border px-2 font-mono text-[10px] transition-colors ${
         emphasis
-          ? "border-emerald-700/60 bg-emerald-900/20 text-emerald-200 hover:border-emerald-400"
-          : "border-[#263044] bg-[#111722] text-slate-300 hover:border-slate-500 hover:text-white"
-      } disabled:cursor-not-allowed disabled:border-[#1e2635] disabled:bg-[#0b0f16] disabled:text-slate-600`}
+          ? "border-cyan-700/60 bg-cyan-500/[0.06] text-cyan-200 hover:border-cyan-500/80 hover:bg-cyan-500/[0.1]"
+          : "border-[#253346] bg-[#0e151f] text-[#b6c4d4] hover:border-[#405572] hover:bg-[#131d29] hover:text-[#edf4fb]"
+      } disabled:cursor-not-allowed disabled:border-[#192331] disabled:bg-[#0b1017] disabled:text-[#455365]`}
     >
       {label}
-      {shortcut ? <span className="ml-1 text-[9px] text-slate-600">{shortcut}</span> : null}
+    </button>
+  );
+}
+
+function ToolbarSeparator() {
+  return <span className="mx-0.5 h-5 w-px bg-[#1d2938]" aria-hidden="true" />;
+}
+
+function LayoutToggle({
+  active,
+  label,
+  title,
+  testId,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  title: string;
+  testId: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      data-testid={testId}
+      title={title}
+      className={`h-6 border px-1.5 font-mono text-[9px] uppercase tracking-[0.08em] transition-colors ${
+        active
+          ? "border-[#34465c] bg-[#131d29] text-[#a9b9cb]"
+          : "border-[#1d2938] bg-[#0b1017] text-[#4f6074] hover:text-[#8fa2b7]"
+      }`}
+    >
+      {label}
     </button>
   );
 }
@@ -68,10 +97,12 @@ export function Toolbar({ samples, connection, ready }: ToolbarProps) {
   const session = useDebugStore((state) => state.session);
   const debuggerState = useDebugStore((state) => state.debuggerState);
   const busy = useDebugStore((state) => state.busy);
-  const streamStatus = useDebugStore((state) => state.streamStatus);
   const animationsEnabled = useDebugStore((state) => state.animationsEnabled);
-  const snapshot = useDebugStore((state) => state.snapshot);
+  const leftPanelCollapsed = useDebugStore((state) => state.leftPanelCollapsed);
+  const rightPanelCollapsed = useDebugStore((state) => state.rightPanelCollapsed);
   const toggleAnimations = useDebugStore((state) => state.toggleAnimations);
+  const toggleLeftPanel = useDebugStore((state) => state.toggleLeftPanel);
+  const toggleRightPanel = useDebugStore((state) => state.toggleRightPanel);
   const startSession = useDebugStore((state) => state.startSession);
   const launchExisting = useDebugStore((state) => state.launchExisting);
   const continueExecution = useDebugStore((state) => state.continueExecution);
@@ -90,39 +121,38 @@ export function Toolbar({ samples, connection, ready }: ToolbarProps) {
   const canContinue = debuggerState === "STOPPED" && Boolean(session) && !busy;
   const canPause = debuggerState === "RUNNING" && Boolean(session) && !busy;
   const canStep = debuggerState === "STOPPED" && Boolean(session) && !busy;
-  const connectionTone =
-    connection === "online" ? "ok" : connection === "checking" ? "info" : "error";
-  const streamTone: Tone =
-    streamStatus === "open" ? "ok" : streamStatus === "reconnecting" ? "warn" : "idle";
 
   return (
-    <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-[#1e2635] bg-[#0b0f16] px-4 py-2.5">
-      <div className="flex items-center gap-2">
+    <header
+      className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b border-[#1a2431] bg-[#090e15] px-3"
+      data-testid="toolbar"
+    >
+      <div className="flex shrink-0 items-center gap-2">
         <span
           aria-hidden="true"
-          className="grid h-6 w-6 place-items-center rounded bg-emerald-500/15 font-mono text-xs font-bold text-emerald-400 ring-1 ring-emerald-500/30"
+          className="grid h-[22px] w-[22px] place-items-center border border-emerald-500/35 bg-emerald-500/[0.08] font-mono text-[11px] font-bold text-emerald-300"
         >
           P
         </span>
-        <div className="leading-tight">
-          <div className="text-sm font-semibold tracking-wide text-slate-100">PWNviz</div>
-          <div className="text-[10px] uppercase tracking-[0.16em] text-slate-600">
+        <div className="leading-none">
+          <div className="text-[13px] font-semibold tracking-[0.08em] text-[#dbe6f2]">PWNviz</div>
+          <div className="mt-1 hidden text-[8px] uppercase tracking-[0.22em] text-[#55657a] xl:block">
             memory debug studio
           </div>
         </div>
       </div>
 
-      <div className="mx-1 h-7 w-px bg-[#1e2635]" aria-hidden="true" />
+      <div className="mx-1 h-6 w-px shrink-0 bg-[#1d2938]" aria-hidden="true" />
 
-      <label className="flex items-center gap-2 text-[11px] text-slate-500">
-        <span className="uppercase tracking-[0.12em]">Target</span>
+      <label className="flex shrink-0 items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-[#5d6e82]">
+        <span>target</span>
         <select
           value={selectedSampleId ?? ""}
           onChange={(event) => setSelectedSampleId(event.target.value)}
           disabled={Boolean(session) || samples.length === 0}
-          className="min-w-[11rem] rounded border border-[#263044] bg-[#111722] px-2 py-1 font-mono text-xs text-slate-200 disabled:opacity-50"
+          className="h-6 w-[9.5rem] border border-[#253346] bg-[#0d141d] px-1.5 font-mono text-[10px] normal-case tracking-normal text-[#d0dbe7] disabled:opacity-50"
         >
-          {samples.length === 0 ? <option value="">no samples discovered</option> : null}
+          {samples.length === 0 ? <option value="">no samples</option> : null}
           {samples.map((sample) => (
             <option key={sample.id} value={sample.id}>
               {sample.id}
@@ -132,34 +162,11 @@ export function Toolbar({ samples, connection, ready }: ToolbarProps) {
         </select>
       </label>
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        <StatusBadge tone={connectionTone}>{CONNECTION_LABEL[connection]}</StatusBadge>
-        <StatusBadge tone={stateTone(debuggerState)}>{debuggerState.toLowerCase()}</StatusBadge>
-        <StatusBadge tone={streamTone}>
-          {streamStatus === "open"
-            ? "stream live"
-            : streamStatus === "reconnecting"
-              ? "stream reconnecting"
-              : streamStatus === "connecting"
-                ? "stream connecting"
-                : "stream closed"}
-        </StatusBadge>
-        {session ? (
-          <span className="font-mono text-[10px] text-slate-600" title={session.session_id}>
-            {session.session_id.slice(0, 15)}…
-          </span>
-        ) : null}
-        {snapshot ? (
-          <span className="font-mono text-[10px] text-slate-500" data-testid="snapshot-id">
-            snapshot #{snapshot.snapshot_id}
-          </span>
-        ) : null}
-      </div>
+      <div className="mx-1 h-6 w-px shrink-0 bg-[#1d2938]" aria-hidden="true" />
 
-      <div className="ml-auto flex flex-wrap items-center gap-1.5">
+      <div className="flex shrink-0 items-center gap-1">
         <ActionButton
           label="Run"
-          shortcut="r"
           testId="run-session"
           emphasis
           disabled={session ? !canLaunchExisting : !canStart}
@@ -170,83 +177,111 @@ export function Toolbar({ samples, connection, ready }: ToolbarProps) {
         />
         <ActionButton
           label="Continue"
-          shortcut="c"
           testId="continue"
           disabled={!canContinue}
           onClick={() => void continueExecution()}
+          title="Continue (c)"
         />
         <ActionButton
           label="Pause"
-          shortcut="p"
           testId="pause"
           disabled={!canPause}
           onClick={() => void pause()}
+          title="Interrupt the inferior (p)"
         />
+        <ToolbarSeparator />
         <ActionButton
           label="StepI"
-          shortcut="s"
           testId="step-instruction"
           emphasis
           disabled={!canStep}
           onClick={() => void stepInstruction()}
-          title="Step Instruction — execute one machine instruction"
+          title="Step one machine instruction (s)"
         />
         <ActionButton
           label="NextI"
-          shortcut="n"
           testId="next-instruction"
           disabled={!canStep}
           onClick={() => void nextInstruction()}
-          title="Next Instruction — execute one instruction, stepping over calls"
+          title="Execute one instruction, stepping over calls (n)"
         />
+        <ToolbarSeparator />
         <ActionButton
           label="Step Into"
-          shortcut="i"
           testId="step-into"
           disabled={!canStep}
           onClick={() => void stepSource()}
-          title="Step Into — source-level step into calls"
+          title="Source-level step into calls (i)"
         />
         <ActionButton
           label="Step Over"
-          shortcut="o"
           testId="step-over"
           disabled={!canStep}
           onClick={() => void nextSource()}
-          title="Step Over — source-level step over calls"
+          title="Source-level step over calls (o)"
         />
+        <ToolbarSeparator />
         <ActionButton
           label="Finish"
-          shortcut="f"
           testId="finish"
           disabled={!canStep}
           onClick={() => void finish()}
+          title="Run until the current frame returns (f)"
         />
+        <ToolbarSeparator />
         <ActionButton
           label="Restart"
           testId="restart"
           disabled={!session || busy}
           onClick={() => void restartSession()}
-          title="Delete this session and start a fresh run at main"
+          title="Delete and recreate a fresh session at main"
         />
         <ActionButton
           label="Terminate"
           testId="terminate"
           disabled={!session || busy}
           onClick={() => void terminate()}
+          title="Terminate the inferior and release GDB"
         />
       </div>
 
-      <label className="flex items-center gap-1.5 rounded border border-[#263044] bg-[#0b0f16] px-2 py-1 font-mono text-[10px] text-slate-400">
-        <input
-          type="checkbox"
-          checked={animationsEnabled}
-          onChange={toggleAnimations}
-          className="h-3 w-3 accent-emerald-500"
-          data-testid="animation-toggle"
+      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        <span
+          className="flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[#5d6e82]"
+          title={CONNECTION_LABEL[connection]}
+        >
+          <span className={`h-1.5 w-1.5 ${connectionColor(connection)}`} aria-hidden="true" />
+          <span className="hidden 2xl:inline">{CONNECTION_LABEL[connection]}</span>
+        </span>
+        <span className="mx-1 hidden h-6 w-px bg-[#1d2938] 2xl:block" aria-hidden="true" />
+        <LayoutToggle
+          active={!leftPanelCollapsed}
+          label="Disasm"
+          testId="toggle-disasm"
+          title={leftPanelCollapsed ? "Show disassembly panel" : "Collapse disassembly panel"}
+          onClick={toggleLeftPanel}
         />
-        diff animation
-      </label>
+        <LayoutToggle
+          active={!rightPanelCollapsed}
+          label="Regs"
+          testId="toggle-registers"
+          title={rightPanelCollapsed ? "Show register panel" : "Collapse register panel"}
+          onClick={toggleRightPanel}
+        />
+        <label
+          className="flex h-6 items-center gap-1.5 border border-[#253346] bg-[#0b1017] px-1.5 font-mono text-[9px] uppercase tracking-[0.08em] text-[#6b7c90]"
+          title="Animate changed stack bytes (disabled automatically by reduce-motion)"
+        >
+          <input
+            type="checkbox"
+            checked={animationsEnabled}
+            onChange={toggleAnimations}
+            className="h-3 w-3 accent-emerald-500"
+            data-testid="animation-toggle"
+          />
+          diff fx
+        </label>
+      </div>
     </header>
   );
 }

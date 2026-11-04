@@ -657,7 +657,7 @@ Tests 25 passed (25)
 
 tsc --noEmit && vite build
 ✓ 40 modules transformed
-dist/assets/index-*.js 295.47 kB
+dist/assets/index-*.js 302.09 kB
 ```
 
 测试覆盖：64-bit BigInt 精确性、地址格式化/比较/行内 offset、RSP/RBP marker、
@@ -873,7 +873,7 @@ Debug Log 的 GDB/MI 输出、Explanation 面板同时验证。
 ### 20.3 验证
 
 - 后端：`115 passed, 1 warning`（真实 GDB；含 4 个变量矩阵测试）；
-- 前端：`25 passed`；`tsc --noEmit && vite build` 成功（295.47 kB）；
+- 前端：`25 passed`；`tsc --noEmit && vite build` 成功（302.09 kB）；
 - 前端 E2E 增加 Variables 标签与 provenance 断言；
 - 变量 UI 截图：[assets/workbench-variables.png](assets/workbench-variables.png)。
 
@@ -884,3 +884,53 @@ Debug Log 的 GDB/MI 输出、Explanation 面板同时验证。
 - PWNviz 推断：仅将 GDB type 分类为 pointer/array/struct/string 的显示 kind；
   不从 raw memory 猜测变量名或作用域。
 - 无 debug info 时没有“猜测变量”；只保留 raw 内存/寄存器视图。
+
+## 21. 视觉语言打磨（2026-11-04）
+
+### 21.1 打磨前的问题
+
+- 1280×720 下 `19rem` 固定 Bottom Dock + 28px footer 挤压 Stack，RSP 行经常不在首屏；
+- 三栏使用 `fr` + Stack `min-width:720px`，在 1280 下 qword/ASCII/markers 被裁切或水平滚动；
+- Toolbar 混排 connection/state/stream/session/snapshot 徽标和全部动作，1280 下换行，视觉层级弱；
+- footer 重复 state/stream/snapshot，占用主视图高度；
+- 左右面板不可折叠，Stack Canvas 无法获得最大宽度；
+- Stack byte cell 圆角、marker 文本叠在 cell 内；RSP/RBP 只有局部颜色，缺少行级标记和文字；
+- Disassembly/Registers 缺少明确的 current/changed 语义列，Register before→after 被挤在一行；
+- 全局 secondary 文本过暗、字号不统一；RSP/RBP/current/diff 颜色语义不稳定；
+- Bottom Dock 的 tab meta 文案过多，未选 cell 时 Inspector 大量留白；
+- 动画只处理了 byte flash，`reduce motion` 下 smooth scroll 仍可能执行。
+
+### 21.2 视觉语言
+
+- 石墨背景 `#070a0f` / 面板 `#0b1017` / header `#090e15` / 分隔线
+  `#1a2431`；无大面积渐变、玻璃拟态或 dashboard 卡片；
+- 语义色固定为：current/RIP 青、RSP 橙、RBP 蓝、diff 绿、unavailable 灰、
+  error 玫红；所有颜色同时带文字标签（RSP+0、RBP+0、changed Δ、unknown、
+  unreadable、STOPPED 等）；
+- 等宽字体 + `tabular-nums` 用于地址/寄存器/内存/状态；
+- Stack 行高 22px，8 byte cell 固定边界，sticky 列头，RSP 行自动居中，
+  支持 `prefers-reduced-motion` 时关闭 smooth scroll；
+- 面板固定在 1280 下：Disassembly 305px、Registers 245px、Stack 占剩余；
+  两侧折叠成 34px rail，Bottom Dock 折叠成 32px tab bar；
+- Toolbar 单行分组为 Run/Continue/Pause · StepI/NextI · Step Into/Over ·
+  Finish · Restart/Terminate；状态/stream/session 移入紧凑 Status Bar；
+- 移除 footer；Bottom Dock 高度 `clamp(9.5rem,21vh,15rem)`；
+- 无 cell 选择时 Memory Inspector 显示 RIP/RSP/RBP/stack range 摘要，不再整块留白。
+
+### 21.3 1280×720 验证
+
+- 1280×720 截图：[assets/workbench-1280.png](assets/workbench-1280.png)
+- 打磨前对照：[assets/workbench-1280-before.png](assets/workbench-1280-before.png)
+- 两侧折叠后的 Stack 最大化：[assets/workbench-1280-focus.png](assets/workbench-1280-focus.png)
+- E2E 断言：折叠 Disassembly 后 Stack Canvas 宽度
+  **1128 → 1399px**（1680 viewport）；Bottom Dock 折叠/展开；
+- 在 `--force-prefers-reduced-motion` 的 Chromium 中检查：
+  `matchMedia(...)=true`、changed byte `animation-name:none`、
+  stack scroll `scroll-behavior:auto`。
+
+### 21.4 测试
+
+- 后端：`115 passed, 1 warning`（未改数据流；本次无后端改动）；
+- 前端：`25 passed`；`tsc --noEmit && vite build` 成功（302.09 kB）；
+- 真实 E2E 通过：Run → StepI → Step Into → RSP 变化 → Finish → Exit →
+  Restart；Variables provenance；layout collapse；Debug Log。

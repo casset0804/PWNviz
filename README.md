@@ -63,6 +63,14 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
   - 无 DWARF 时 variables 为空并给 warning，raw stack/register 保持完整；
   - 不耦合 pwndbg 私有模块；无 debug 信息时不做变量猜测；
 - React + TypeScript + Vite + Tailwind + Zustand 深色 IDE 工作台；
+- **视觉语言**：
+  - 石墨色低饱和 surface、1px 分隔线、等宽地址/寄存器；
+  - Stack Canvas 优先宽度，左右面板和 Bottom Dock 可折叠；
+  - RSP 橙色、RBP 蓝色、current RIP 青色、diff 绿色、unreadable 玫红，
+    同时保留 RSP+0 / changed / unknown 等文字标签；
+  - 22px 栈行、sticky 列头、RSP 自动居中、reduce-motion 关闭动画和 smooth scroll；
+  - 1280×720 桌面验证；[1280 截图](docs/assets/workbench-1280.png)、
+    [折叠聚焦截图](docs/assets/workbench-1280-focus.png)；
 - 本机安全护栏：非 loopback 绑定默认拒绝、HTTP/WS 非 loopback 客户端中间件、
   `Host` 白名单、跨站浏览器请求拒绝、CORS 收紧、子进程组超时清理；
 - 生命周期清理：DELETE/取消/退出/reader 失败均回收 GDB，WebSocket 队列有界；
@@ -75,6 +83,10 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
 ![Phase 3 工作台（真实 GDB 会话）](docs/assets/workbench-phase2.png)
 
 ![Variables / DWARF 语义](docs/assets/workbench-variables.png)
+
+![1280×720 工作台](docs/assets/workbench-1280.png)
+
+![折叠两侧面板后的 Stack 聚焦](docs/assets/workbench-1280-focus.png)
 
 > 截图来自真实 GDB 会话：RSP、RBP、RIP 与栈字节均来自后端 Snapshot；
 > 状态栏与断点来自 WebSocket 事件；高亮的 `0a` 是 StepI 后 diff 检测到的真实

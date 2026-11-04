@@ -64,9 +64,15 @@ interface DebugStore {
   error: string | null;
   bottomTab: BottomTab;
   log: LogEntry[];
+  leftPanelCollapsed: boolean;
+  rightPanelCollapsed: boolean;
+  bottomDockCollapsed: boolean;
 
   setSelectedSampleId: (sampleId: string | null) => void;
   setBottomTab: (tab: BottomTab) => void;
+  toggleLeftPanel: () => void;
+  toggleRightPanel: () => void;
+  toggleBottomDock: () => void;
   dismissError: () => void;
   toggleAnimations: () => void;
   selectByte: (address: string) => void;
@@ -201,6 +207,9 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
   error: null,
   bottomTab: "environment",
   log: [],
+  leftPanelCollapsed: false,
+  rightPanelCollapsed: false,
+  bottomDockCollapsed: false,
 
   setSelectedSampleId: (selectedSampleId) => {
     if (get().session) return;
@@ -208,6 +217,12 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
   },
 
   setBottomTab: (bottomTab) => set({ bottomTab }),
+  toggleLeftPanel: () =>
+    set((state) => ({ leftPanelCollapsed: !state.leftPanelCollapsed })),
+  toggleRightPanel: () =>
+    set((state) => ({ rightPanelCollapsed: !state.rightPanelCollapsed })),
+  toggleBottomDock: () =>
+    set((state) => ({ bottomDockCollapsed: !state.bottomDockCollapsed })),
 
   dismissError: () => set({ error: null }),
 

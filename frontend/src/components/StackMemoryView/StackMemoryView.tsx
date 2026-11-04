@@ -1,11 +1,27 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 
-import { addBytes, addressInWindow, compareAddress, normalizeAddress, offsetWithinRow } from "../../lib/address";
+import {
+  addBytes,
+  addressInWindow,
+  compareAddress,
+  normalizeAddress,
+  offsetWithinRow,
+} from "../../lib/address";
 import { changedBytesMap, markersForRow } from "../../lib/snapshot";
 import { useDebugStore } from "../../stores/debugStore";
 import type { StackRow } from "../../types/debug";
 import { Panel } from "../common/Panel";
-import { StatusBadge } from "../common/StatusBadge";
+
+const STACK_GRID =
+  "grid-cols-[8.7rem_repeat(8,1.55rem)_minmax(7.8rem,1fr)_minmax(4.2rem,0.65fr)_minmax(5.5rem,0.75fr)]";
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
 
 function ByteCell({
   address,
@@ -43,10 +59,8 @@ function ByteCell({
       onClick={() => onSelect(address)}
       title={`${address}: byte ${byte ?? "unreadable"}${markerTitle}${changeTitle}`}
       aria-label={`Address ${address}, byte ${byte ?? "unreadable"}${markerTitle}${changeTitle}`}
-      className={`relative h-6 rounded-sm border px-0.5 text-center font-mono text-[10px] leading-5 transition-colors ${
-        unreadable
-          ? "byte-cell-unreadable text-slate-600"
-          : "border-[#1b2534] bg-[#0b111a] text-slate-300 hover:border-slate-500"
+      className={`relative h-[18px] border border-[#1a2634] bg-[#0b111a] text-center font-mono text-[9px] leading-[16px] transition-colors ${
+        unreadable ? "byte-cell-unreadable text-[#7b6570]" : "text-[#b8c5d3] hover:border-[#4c6078] hover:bg-[#111c28]"
       } ${
         changed
           ? animationsEnabled
@@ -55,22 +69,12 @@ function ByteCell({
           : ""
       } ${markerKinds.includes("RSP") ? "byte-cell-rsp" : ""} ${
         markerKinds.includes("RBP") ? "byte-cell-rbp" : ""
-      } ${selected ? "ring-2 ring-amber-400 ring-offset-1 ring-offset-[#0d1117]" : ""}`}
+      } ${selected ? "outline outline-1 -outline-offset-1 outline-amber-400" : ""}`}
     >
       {byte ?? "--"}
       {changed ? (
-        <span aria-hidden="true" className="absolute -right-0.5 -top-1 text-[8px] text-emerald-300">
+        <span aria-hidden="true" className="absolute right-px top-px font-mono text-[7px] leading-none text-emerald-300/90">
           Δ
-        </span>
-      ) : null}
-      {markerKinds.length > 0 ? (
-        <span
-          aria-hidden="true"
-          className={`absolute -bottom-1 left-0 right-0 text-center text-[7px] leading-none ${
-            markerKinds.includes("RSP") ? "text-orange-300" : "text-sky-300"
-          }`}
-        >
-          {markerKinds.join("/")}
         </span>
       ) : null}
     </button>
@@ -95,23 +99,28 @@ function StackRowView({
   onSelect: (address: string) => void;
 }) {
   const markers = markersForRow(row, rsp, rbp);
-  const markerLabel = markers.map((marker) => `${marker.kind}+${marker.offset}`).join(" ");
+  const hasRsp = markers.some((marker) => marker.kind === "RSP");
+  const hasRbp = markers.some((marker) => marker.kind === "RBP");
   const changedCount = row.bytes.reduce((count, _cell, index) => {
     const address = addBytes(row.address, index);
     return count + (address && changed.has(address) ? 1 : 0);
   }, 0);
-  const rowClasses = row.readable
-    ? "border-[#141b26] odd:bg-[#0f141d]"
-    : "border-[#2a1f2e] bg-[#160f18]";
+  const rowTone = hasRsp
+    ? "border-l-[#f6ad55]/70 bg-[#f6ad55]/[0.025]"
+    : hasRbp
+      ? "border-l-[#7db8e8]/60 bg-[#7db8e8]/[0.022]"
+      : row.readable
+        ? "border-l-transparent odd:bg-[#0b1119]"
+        : "border-l-[#fb7185]/30 bg-[#130d13]";
 
   return (
     <div
       data-testid="stack-row"
       data-row-address={row.address}
       data-readable={row.readable ? "true" : "false"}
-      className={`grid min-w-[720px] grid-cols-[9.2rem_repeat(8,1.7rem)_minmax(8.5rem,1fr)_minmax(5rem,0.8fr)_minmax(7.5rem,1fr)] items-center gap-1 border-b px-2 py-0.5 ${rowClasses}`}
+      className={`grid ${STACK_GRID} h-[22px] min-w-[700px] items-center gap-1 border-b border-l-2 border-b-[#121b26] px-2 font-mono ${rowTone}`}
     >
-      <span className="font-mono text-[10px] text-slate-500" title={row.address}>
+      <span className="truncate text-[9px] text-[#65778c]" title={row.address}>
         {row.address}
       </span>
       {row.bytes.map((byte, index) => {
@@ -134,20 +143,36 @@ function StackRowView({
           />
         );
       })}
-      <span className="truncate font-mono text-[10px] text-slate-300" title={row.qword_le ?? "unreadable"}>
-        {row.qword_le ?? <span className="text-rose-300/70">unreadable</span>}
+      <span
+        className="truncate text-[9px] text-[#aab8c8]"
+        title={row.qword_le ?? "unreadable"}
+      >
+        {row.qword_le ?? <span className="text-[#b97a86]">unreadable</span>}
       </span>
-      <span className="truncate font-mono text-[10px] text-slate-500" title={row.ascii ?? "unreadable"}>
-        {row.ascii ?? <span className="text-rose-300/70">unreadable</span>}
+      <span
+        className="truncate text-[9px] text-[#63758a]"
+        title={row.ascii ?? "unreadable"}
+      >
+        {row.ascii ?? <span className="text-[#b97a86]">unreadable</span>}
       </span>
-      <span className="flex flex-wrap items-center gap-1 font-mono text-[9px] text-slate-600">
-        {markerLabel ? (
-          <span className="text-orange-300/90">{markerLabel}</span>
-        ) : null}
+      <span className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[8px]">
+        {markers.map((marker) => (
+          <span
+            key={`${marker.kind}-${marker.offset}`}
+            className={marker.kind === "RSP" ? "text-[#f6ad55]" : "text-[#7db8e8]"}
+            title={`${marker.kind} ${row.address} +${marker.offset}`}
+          >
+            {marker.kind}
+            <span className="opacity-60">+{marker.offset}</span>
+          </span>
+        ))}
         {changedCount > 0 ? (
-          <span className="text-emerald-300/90">changed {changedCount}</span>
+          <span className="text-emerald-300/90" title={`${changedCount} changed byte(s) this row`}>
+            Δ{changedCount}
+            <span className="sr-only"> changed</span>
+          </span>
         ) : null}
-        {!row.readable ? <span className="text-rose-300/80">unknown</span> : null}
+        {!row.readable ? <span className="text-[#b97a86]">unknown</span> : null}
       </span>
     </div>
   );
@@ -182,40 +207,54 @@ export function StackMemoryView() {
   const centeredRsp = useRef<string | null>(null);
 
   const scrollToAddress = useCallback(
-    (address: string | null) => {
-      if (!address || !scrollRef.current || !snapshot) return;
+    (address: string | null): boolean => {
+      const container = scrollRef.current;
+      if (!address || !container || !snapshot) return false;
+      if (container.clientHeight < 1) return false;
       const row = snapshot.stack.rows.find(
         (candidate) => offsetWithinRow(candidate.address, address) !== null,
       );
-      if (!row) return;
-      const element = scrollRef.current.querySelector(
-        `[data-row-address="${row.address}"]`,
-      );
-      if (element instanceof HTMLElement) {
-        element.scrollIntoView({
-          block: "center",
-          inline: "nearest",
-          behavior: animationsEnabled ? "smooth" : "auto",
-        });
-      }
+      if (!row) return false;
+      const element = container.querySelector(`[data-row-address="${row.address}"]`);
+      if (!(element instanceof HTMLElement)) return false;
+      const top =
+        element.getBoundingClientRect().top -
+        container.getBoundingClientRect().top +
+        container.scrollTop;
+      container.scrollTo({
+        top: Math.max(0, top - container.clientHeight / 2 + element.clientHeight / 2),
+        behavior: animationsEnabled && !prefersReducedMotion() ? "smooth" : "auto",
+      });
+      return true;
     },
     [snapshot, animationsEnabled],
   );
 
-  // Center RSP on first snapshot and whenever RSP actually moves. This keeps the
-  // orange RSP marker visible without fighting a user who is browsing elsewhere
-  // while RSP is unchanged.
-  useEffect(() => {
+  // Center RSP after layout has a real height. A first-frame pass is not
+  // enough in headless/narrow windows: the scroll container can still be 0px
+  // tall and would otherwise never retry.
+  useLayoutEffect(() => {
     if (!snapshot) {
       centeredRsp.current = null;
       return;
     }
-    if (!rsp) return;
-    if (centeredRsp.current === null || rsp !== centeredRsp.current) {
-      centeredRsp.current = rsp;
-      scrollToAddress(rsp);
-    }
+    if (!rsp || centeredRsp.current === rsp) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (scrollToAddress(rsp)) centeredRsp.current = rsp;
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [snapshot, rsp, previousRsp, scrollToAddress]);
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container || !rsp) return;
+    const observer = new ResizeObserver(() => {
+      if (centeredRsp.current === rsp) return;
+      if (scrollToAddress(rsp)) centeredRsp.current = rsp;
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [rsp, scrollToAddress]);
 
   const rspInView = addressInWindow(rsp, rangeStart, rangeEnd);
   const rbpInView = addressInWindow(rbp, rangeStart, rangeEnd);
@@ -229,80 +268,80 @@ export function StackMemoryView() {
   return (
     <Panel
       title="Stack memory"
-      hint="high address on top · stack grows downward"
+      hint="RSP-centred window · high address on top"
       className="min-w-0"
       actions={
-        <StatusBadge tone={snapshot ? "ok" : "idle"}>
+        <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-[#6c7d91]">
           {snapshot ? `${snapshot.stack.rows.length} rows` : "no snapshot"}
-        </StatusBadge>
+        </span>
       }
     >
       <div className="flex h-full min-h-0 flex-col" data-testid="stack-canvas">
-        <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-[#1e2635] px-3 py-1.5 font-mono text-[9px] text-slate-500">
-          <span className="inline-flex items-center gap-1">
-            <span className="h-2 w-2 rounded-sm border border-orange-400 bg-orange-500/20" />
-            RSP marker
+        <div className="flex h-6 shrink-0 items-center gap-3 overflow-hidden border-b border-[#1a2431] bg-[#0a0f15] px-2.5 font-mono text-[8px] uppercase tracking-[0.08em] text-[#5f7085]">
+          <span className="inline-flex shrink-0 items-center gap-1">
+            <span className="h-2 w-2 border border-[#f6ad55] bg-[#f6ad55]/15" aria-hidden="true" />
+            RSP
           </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="h-2 w-2 rounded-sm border border-sky-400 bg-sky-500/20" />
-            RBP marker
+          <span className="inline-flex shrink-0 items-center gap-1">
+            <span className="h-2 w-2 border border-[#7db8e8] bg-[#7db8e8]/15" aria-hidden="true" />
+            RBP
           </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="text-emerald-300">Δ</span>
-            changed byte
+          <span className="inline-flex shrink-0 items-center gap-1">
+            <span className="text-emerald-300">Δ</span> changed
           </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="h-2 w-2 rounded-sm border border-rose-400/60 bg-rose-500/10" />
-            unknown / unreadable
+          <span className="inline-flex shrink-0 items-center gap-1">
+            <span className="h-2 w-2 border border-dashed border-[#b97a86] bg-[#b97a86]/10" aria-hidden="true" />
+            unreadable
           </span>
-          <span className="ml-auto text-slate-600">
+          <span className="ml-auto hidden truncate text-[#4d5e72] xl:block">
             {rangeStart && rangeEnd ? `${rangeStart} .. ${rangeEnd}` : "no stack window"}
           </span>
         </div>
 
         {!snapshot ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-            <StatusBadge tone={session ? "warn" : "idle"}>
+            <span className="border border-[#2a394c] px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-[#76889c]">
               {session ? "waiting for stopped snapshot" : "no live session"}
-            </StatusBadge>
-            <p className="max-w-md text-[11px] leading-5 text-slate-500">
-              Launch a teaching sample from the toolbar. Rows are only rendered from a real
-              GDB snapshot; unreadable bytes are shown as <span className="font-mono">--</span>,
-              never as zero.
+            </span>
+            <p className="max-w-md text-[10px] leading-4 text-[#617186]">
+              Launch a teaching sample from the toolbar. Rows are rendered only from a real GDB
+              snapshot; unreadable bytes stay <span className="font-mono">--</span>, never zero.
             </p>
           </div>
         ) : (
           <>
-            <div className="flex shrink-0 items-center justify-between px-3 py-1 font-mono text-[9px] uppercase tracking-[0.18em] text-slate-600">
+            <div className="flex h-4 shrink-0 items-center justify-between px-3 font-mono text-[8px] uppercase tracking-[0.18em] text-[#4f6074]">
               <span data-testid="high-address">HIGH ADDRESS</span>
-              <span className="text-slate-700">8 bytes / row · little-endian</span>
+              <span className="hidden text-[#3f4f61] sm:block">8 bytes / row · little-endian</span>
             </div>
 
             {rsp && !rspInView ? (
-              <div className="mx-3 mb-1 rounded border border-orange-500/30 bg-orange-500/5 px-2 py-1 font-mono text-[10px] text-orange-200/80">
+              <div className="mx-2 mb-1 border-l-2 border-[#f6ad55]/70 bg-[#f6ad55]/[0.045] px-2 py-1 font-mono text-[9px] text-[#e7b878]">
                 RSP {rsp} is outside the current stack window
               </div>
             ) : null}
             {rbp && !rbpInView ? (
-              <div className="mx-3 mb-1 rounded border border-sky-500/30 bg-sky-500/5 px-2 py-1 font-mono text-[10px] text-sky-200/80">
+              <div className="mx-2 mb-1 border-l-2 border-[#7db8e8]/60 bg-[#7db8e8]/[0.04] px-2 py-1 font-mono text-[9px] text-[#a9c9e3]">
                 RBP {rbp} is outside the current stack window
               </div>
             ) : null}
             {unreadableRanges.length > 0 ? (
-              <div className="mx-3 mb-1 rounded border border-rose-500/30 bg-rose-500/5 px-2 py-1 font-mono text-[10px] text-rose-200/80">
-                {unreadableRanges.length} unreadable range(s) in this window — marked unknown, not zero
+              <div className="mx-2 mb-1 border-l-2 border-[#fb7185]/40 bg-[#fb7185]/[0.035] px-2 py-1 font-mono text-[9px] text-[#d69aa4]">
+                {unreadableRanges.length} unreadable range(s) · marked unknown, not zero
               </div>
             ) : null}
 
             <div className="min-h-0 flex-1 overflow-auto" ref={scrollRef}>
-              <div className="grid min-w-[720px] grid-cols-[9.2rem_repeat(8,1.7rem)_minmax(8.5rem,1fr)_minmax(5rem,0.8fr)_minmax(7.5rem,1fr)] gap-1 border-b border-[#1e2635] bg-[#0a0e14] px-2 py-1 font-mono text-[9px] uppercase tracking-wide text-slate-600">
+              <div
+                className={`sticky top-0 z-10 grid ${STACK_GRID} h-6 min-w-[700px] items-center gap-1 border-b border-[#1a2431] bg-[#0a0f15] px-2 font-mono text-[8px] uppercase tracking-[0.08em] text-[#526477]`}
+              >
                 <span>address</span>
                 {Array.from({ length: 8 }, (_, index) => (
                   <span key={index} className="text-center">
                     +{index}
                   </span>
                 ))}
-                <span>qword (le)</span>
+                <span>qword / le</span>
                 <span>ascii</span>
                 <span>markers</span>
               </div>
@@ -318,11 +357,12 @@ export function StackMemoryView() {
                   onSelect={selectByte}
                 />
               ))}
+              <div className="h-10" aria-hidden="true" />
             </div>
 
-            <div className="flex shrink-0 items-center justify-between px-3 py-1 font-mono text-[9px] uppercase tracking-[0.18em] text-slate-600">
+            <div className="flex h-4 shrink-0 items-center justify-between px-3 font-mono text-[8px] uppercase tracking-[0.18em] text-[#4f6074]">
               <span data-testid="low-address">LOW ADDRESS</span>
-              <span className="text-slate-700">stack grows downward ↓</span>
+              <span className="hidden text-[#3f4f61] sm:block">stack grows downward ↓</span>
             </div>
           </>
         )}

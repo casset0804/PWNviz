@@ -6,24 +6,45 @@ interface PanelProps {
   actions?: ReactNode;
   children: ReactNode;
   className?: string;
+  onCollapse?: () => void;
 }
 
-export function Panel({ title, hint, actions, children, className }: PanelProps) {
+export function Panel({
+  title,
+  hint,
+  actions,
+  children,
+  className,
+  onCollapse,
+}: PanelProps) {
   return (
     <section
-      className={`flex min-h-0 flex-col bg-[#0d1117] ${className ?? ""}`}
+      className={`flex min-h-0 min-w-0 flex-col bg-[#0b1017] ${className ?? ""}`}
       aria-label={title}
     >
-      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-[#1e2635] px-3 py-2">
-        <div className="flex items-baseline gap-2">
-          <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+      <header className="flex h-8 shrink-0 items-center justify-between gap-2 border-b border-[#1a2431] bg-[#0a0f15] px-2.5">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <h2 className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#93a4b8]">
             {title}
           </h2>
           {hint ? (
-            <span className="text-[10px] text-slate-600">{hint}</span>
+            <span className="truncate text-[9px] text-[#5d6d80]">{hint}</span>
           ) : null}
         </div>
-        {actions}
+        <div className="flex shrink-0 items-center gap-1.5">
+          {actions}
+          {onCollapse ? (
+            <button
+              type="button"
+              onClick={onCollapse}
+              title={`Collapse ${title}`}
+              aria-label={`Collapse ${title}`}
+              className="grid h-5 w-5 place-items-center border border-[#202c3b] bg-[#0d141d] font-mono text-[11px] leading-none text-[#6f8094] transition-colors hover:border-[#3a4b60] hover:text-[#c4d2e1]"
+            >
+              ‹
+            </button>
+          ) : null}
+        </div>
       </header>
       <div className="min-h-0 flex-1 overflow-auto">{children}</div>
     </section>

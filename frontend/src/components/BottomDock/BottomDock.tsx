@@ -37,15 +37,20 @@ export function BottomDock({
 }: BottomDockProps) {
   const bottomTab = useDebugStore((state) => state.bottomTab);
   const setBottomTab = useDebugStore((state) => state.setBottomTab);
+  const bottomDockCollapsed = useDebugStore((state) => state.bottomDockCollapsed);
+  const toggleBottomDock = useDebugStore((state) => state.toggleBottomDock);
   const snapshot = useDebugStore((state) => state.snapshot);
   const log = useDebugStore((state) => state.log);
 
   return (
     <section
-      className="flex h-[19rem] shrink-0 flex-col border-t border-[#1e2635] bg-[#0d1117]"
+      className={`flex shrink-0 flex-col border-t border-[#1a2431] bg-[#0b1017] ${
+        bottomDockCollapsed ? "h-8" : "h-[clamp(9.5rem,21vh,15rem)]"
+      }`}
       aria-label="Inspector dock"
+      data-testid="bottom-dock"
     >
-      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-[#1e2635] px-2 py-1.5">
+      <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-[#1a2431] bg-[#090e15] px-2">
         {TABS.map((tab) => {
           const active = tab.id === bottomTab;
           const badge =
@@ -59,50 +64,59 @@ export function BottomDock({
               key={tab.id}
               type="button"
               data-testid={`tab-${tab.id}`}
-              onClick={() => setBottomTab(tab.id)}
+              title={tab.meta}
+              onClick={() => {
+                setBottomTab(tab.id);
+                if (bottomDockCollapsed) toggleBottomDock();
+              }}
               aria-pressed={active}
-              className={`flex items-baseline gap-1.5 rounded px-2.5 py-1 font-mono text-[11px] transition-colors ${
+              className={`relative flex h-8 items-center gap-1.5 border-b px-2 font-mono text-[10px] transition-colors ${
                 active
-                  ? "bg-[#182131] text-slate-100"
-                  : "text-slate-500 hover:bg-[#131a26] hover:text-slate-300"
+                  ? "border-cyan-400/70 bg-[#0d151f] text-[#d5e2ef]"
+                  : "border-transparent text-[#68798d] hover:bg-[#0d141d] hover:text-[#b6c5d6]"
               }`}
             >
               <span>{tab.label}</span>
-              <span
-                className={`text-[9px] uppercase tracking-wide ${
-                  active ? "text-emerald-400/80" : "text-slate-700"
-                }`}
-              >
-                {tab.meta}
-              </span>
               {badge !== null ? (
-                <span className="rounded bg-emerald-500/10 px-1 text-[9px] text-emerald-300">
+                <span className="min-w-3 border border-emerald-500/20 bg-emerald-500/[0.08] px-1 text-[8px] leading-3 text-emerald-300">
                   {badge}
                 </span>
               ) : null}
             </button>
           );
         })}
+        <button
+          type="button"
+          onClick={toggleBottomDock}
+          data-testid="dock-toggle"
+          aria-label={bottomDockCollapsed ? "Expand inspector dock" : "Collapse inspector dock"}
+          title={bottomDockCollapsed ? "Expand inspector dock" : "Collapse inspector dock"}
+          className="ml-auto grid h-6 w-6 place-items-center border border-[#202c3b] bg-[#0d141d] font-mono text-[11px] leading-none text-[#718297] hover:border-[#3a4b60] hover:text-[#c6d3e2]"
+        >
+          {bottomDockCollapsed ? "⌃" : "⌄"}
+        </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
-        {bottomTab === "memory" ? <MemoryInspector /> : null}
-        {bottomTab === "variables" ? <VariablesPanel /> : null}
-        {bottomTab === "diff" ? <DiffPanel /> : null}
-        {bottomTab === "explanation" ? <ExplanationPanel /> : null}
-        {bottomTab === "log" ? <DebugLogPanel /> : null}
-        {bottomTab === "environment" ? (
-          <EnvironmentPanel
-            capabilities={capabilities}
-            samples={samples}
-            error={error}
-            loading={loading}
-            verifying={verifying}
-            onRefresh={onRefresh}
-            onVerifyPwndbg={onVerifyPwndbg}
-          />
-        ) : null}
-      </div>
+      {!bottomDockCollapsed ? (
+        <div className="min-h-0 flex-1 overflow-auto">
+          {bottomTab === "memory" ? <MemoryInspector /> : null}
+          {bottomTab === "variables" ? <VariablesPanel /> : null}
+          {bottomTab === "diff" ? <DiffPanel /> : null}
+          {bottomTab === "explanation" ? <ExplanationPanel /> : null}
+          {bottomTab === "log" ? <DebugLogPanel /> : null}
+          {bottomTab === "environment" ? (
+            <EnvironmentPanel
+              capabilities={capabilities}
+              samples={samples}
+              error={error}
+              loading={loading}
+              verifying={verifying}
+              onRefresh={onRefresh}
+              onVerifyPwndbg={onVerifyPwndbg}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -2,7 +2,6 @@ import { useDebugStore } from "../../stores/debugStore";
 import { changedBytesMap, findCell } from "../../lib/snapshot";
 import { addressInWindow } from "../../lib/address";
 import { StatusBadge } from "../common/StatusBadge";
-
 export function MemoryInspector() {
   const snapshot = useDebugStore((state) => state.snapshot);
   const selectedAddress = useDebugStore((state) => state.selectedByteAddress);
@@ -24,25 +23,47 @@ export function MemoryInspector() {
         ) ?? null;
 
   return (
-    <div className="space-y-3 p-4">
+    <div className="space-y-2 p-2.5">
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge tone={cell ? "ok" : "idle"}>
           {cell ? "byte selected" : "no cell selected"}
         </StatusBadge>
-        <span className="text-[11px] text-slate-500">
-          Click any stack byte cell to inspect it. Values are taken directly from the current
-          snapshot.
+        <span className="text-[10px] text-[#6b7c90]">
+          Select any stack byte; values come from the current GDB snapshot.
         </span>
       </div>
 
       {!snapshot ? (
-        <p className="font-mono text-[11px] text-slate-600">
+        <p className="font-mono text-[10px] text-[#5d6e82]">
           No snapshot yet. Launch a session and stop at main.
         </p>
       ) : null}
 
+      {!cell && snapshot ? (
+        <div className="grid grid-cols-2 gap-x-5 gap-y-1 border-l-2 border-[#33465c] bg-[#0b121b] px-2.5 py-2 font-mono text-[9px] md:grid-cols-4">
+          <span className="text-[#5d6e82]">
+            RIP <span className="text-[#a9d8ee]">{snapshot.registers.rip ?? "—"}</span>
+          </span>
+          <span className="text-[#5d6e82]">
+            RSP <span className="text-[#f6ad55]">{snapshot.registers.rsp ?? "—"}</span>
+          </span>
+          <span className="text-[#5d6e82]">
+            RBP <span className="text-[#7db8e8]">{snapshot.registers.rbp ?? "—"}</span>
+          </span>
+          <span className="text-[#5d6e82]">
+            STACK{" "}
+            <span className="text-[#8da0b5]">
+              {snapshot.stack.range_start ?? "—"} .. {snapshot.stack.range_end ?? "—"}
+            </span>
+          </span>
+          <span className="col-span-full text-[8px] uppercase tracking-[0.08em] text-[#4e5f73]">
+            Click a byte cell in Stack Memory to inspect address, byte, qword and ASCII.
+          </span>
+        </div>
+      ) : null}
+
       {pointerTarget ? (
-        <section className="rounded border border-sky-500/30 bg-sky-500/5 p-3">
+        <section className="border-l-2 border-sky-400/50 bg-[#08131b] p-2.5">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[10px] uppercase tracking-[0.14em] text-sky-300/80">
               pointer target
@@ -90,7 +111,7 @@ export function MemoryInspector() {
 
       {cell ? (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded border border-[#1e2635] bg-[#0d1117] p-3">
+          <div className="border-l-2 border-[#33465c] bg-[#0b121b] p-2.5">
             <div className="text-[10px] uppercase tracking-[0.14em] text-slate-600">
               address
             </div>
@@ -101,7 +122,7 @@ export function MemoryInspector() {
               byte offset {cell.offset} in row {cell.row.address}
             </div>
           </div>
-          <div className="rounded border border-[#1e2635] bg-[#0d1117] p-3">
+          <div className="border-l-2 border-[#33465c] bg-[#0b121b] p-2.5">
             <div className="text-[10px] uppercase tracking-[0.14em] text-slate-600">
               byte
             </div>
@@ -119,7 +140,7 @@ export function MemoryInspector() {
                 : `decimal ${parseInt(cell.byte, 16)}`}
             </div>
           </div>
-          <div className="rounded border border-[#1e2635] bg-[#0d1117] p-3">
+          <div className="border-l-2 border-[#33465c] bg-[#0b121b] p-2.5">
             <div className="text-[10px] uppercase tracking-[0.14em] text-slate-600">
               qword (little-endian)
             </div>
@@ -130,7 +151,7 @@ export function MemoryInspector() {
               ASCII {cell.row.ascii ?? "unreadable"}
             </div>
           </div>
-          <div className="rounded border border-[#1e2635] bg-[#0d1117] p-3">
+          <div className="border-l-2 border-[#33465c] bg-[#0b121b] p-2.5">
             <div className="text-[10px] uppercase tracking-[0.14em] text-slate-600">
               row / diff
             </div>
@@ -152,7 +173,7 @@ export function MemoryInspector() {
       ) : null}
 
       {selectedInstruction ? (
-        <div className="rounded border border-amber-500/25 bg-amber-500/5 p-3">
+        <div className="border-l-2 border-amber-500/40 bg-amber-500/[0.035] p-2.5">
           <div className="text-[10px] uppercase tracking-[0.14em] text-amber-300/80">
             selected instruction
           </div>
@@ -172,7 +193,7 @@ export function MemoryInspector() {
       ) : null}
 
       {snapshot?.warnings.length ? (
-        <ul className="space-y-1 rounded border border-amber-500/20 bg-amber-500/5 p-2 font-mono text-[10px] text-amber-200/80">
+        <ul className="space-y-1 border border-amber-500/20 bg-amber-500/5 p-2 font-mono text-[10px] text-amber-200/80">
           {snapshot.warnings.slice(0, 5).map((warning) => (
             <li key={warning}>• {warning}</li>
           ))}
