@@ -339,6 +339,19 @@ async def verify_pwndbg(
 ) -> PwndbgProbe:
     """Actually load pwndbg into a throwaway GDB and check the marker."""
     gdbinit = gdbinit_dir / "gdbinit.py"
+    if any(
+        ord(character) < 0x20 or ord(character) == 0x7F
+        for character in str(gdbinit)
+    ):
+        return PwndbgProbe(
+            status="load_failed",
+            path=str(gdbinit_dir),
+            gdbinit=str(gdbinit),
+            verified=False,
+            version=None,
+            detail="pwndbg path contains control characters; native GDB is used.",
+            enabled=settings.load_pwndbg,
+        )
     budget = timeout if timeout is not None else settings.pwndbg_probe_timeout_seconds
     result = await run_command(
         [

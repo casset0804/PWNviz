@@ -502,7 +502,7 @@ changed_bytes = [{address: 0x7fffffffe274, before: 00, after: 0a}]
 ### 15.4 测试结果
 
 ```text
-115 passed in 151.41s
+123 passed in 144.79s
 ```
 
 核心真实集成测试：
@@ -585,7 +585,7 @@ tests/unit/test_subscriber_backpressure.py
 - 新增失败路径测试：
   `tests/unit/test_mi_reader_failure.py`、`tests/unit/test_session_failure.py`，
   以及 `test_continue_to_exit_and_cleanup` 中“退出后自动释放 GDB”断言。
-- 真实 GDB 集成测试未删除、未改为 mock；当前 115 passed。
+- 真实 GDB 集成测试未删除、未改为 mock；当前 123 passed。
 
 ## 16. Phase 2 前端可视化实测（2026-11-03）
 
@@ -707,7 +707,7 @@ DELETE 失败保留 session、push/pop/mov/sub rsp/add rsp/call/ret/leave/nop �
 
 ### 17.3 验证
 
-- 后端：`115 passed, 1 warning`（真实 GDB 集成测试未删除、未 mock 成功路径）；
+- 后端：`123 passed, 1 warning`（真实 GDB 集成测试未删除、未 mock 成功路径）；
 - 前端：`25 passed`，`tsc --noEmit && vite build` 成功；
 - 真实 UI E2E 仍通过 Run → StepI → changed cell → RSP scroll → Terminate
   （见 16.2；本轮后端中间件未改变 loopback 访问路径）。
@@ -782,7 +782,7 @@ Debug Log 的 GDB/MI 输出、Explanation 面板同时验证。
 
 ### 18.4 测试
 
-- 后端：`115 passed, 1 warning`（真实 GDB 集成测试保留；WS 测试新增
+- 后端：`123 passed, 1 warning`（真实 GDB 集成测试保留；WS 测试新增
   `breakpoints.updated` 与 `debugger.output` 断言）；
 - 前端：`25 passed`；`tsc --noEmit && vite build` 成功；
 - 说明：Step Into 一次可能执行多条机器指令，因此 Explanation 在无法把
@@ -820,7 +820,7 @@ Debug Log 的 GDB/MI 输出、Explanation 面板同时验证。
 
 ### 19.3 验证
 
-- 后端：`115 passed, 1 warning`（真实 GDB 集成测试保留）；
+- 后端：`123 passed, 1 warning`（真实 GDB 集成测试保留）；
 - 前端：`25 passed`；`tsc --noEmit && vite build` 成功；
 - 完整 UI E2E 仍通过（默认 `:5173` / `:8000`）：main → StepI → Step Into →
   RSP `e270→e260` → Finish → RSP `e270` → Continue **Exited** → Restart；
@@ -872,7 +872,7 @@ Debug Log 的 GDB/MI 输出、Explanation 面板同时验证。
 
 ### 20.3 验证
 
-- 后端：`115 passed, 1 warning`（真实 GDB；含 4 个变量矩阵测试）；
+- 后端：`123 passed, 1 warning`（真实 GDB；含 4 个变量矩阵测试）；
 - 前端：`25 passed`；`tsc --noEmit && vite build` 成功（302.09 kB）；
 - 前端 E2E 增加 Variables 标签与 provenance 断言；
 - 变量 UI 截图：[assets/workbench-variables.png](assets/workbench-variables.png)。
@@ -930,7 +930,60 @@ Debug Log 的 GDB/MI 输出、Explanation 面板同时验证。
 
 ### 21.4 测试
 
-- 后端：`115 passed, 1 warning`（未改数据流；本次无后端改动）；
+- 后端：`123 passed, 1 warning`（真实 GDB 与变量矩阵保留）；
 - 前端：`25 passed`；`tsc --noEmit && vite build` 成功（302.09 kB）；
 - 真实 E2E 通过：Run → StepI → Step Into → RSP 变化 → Finish → Exit →
   Restart；Variables provenance；layout collapse；Debug Log。
+
+## 22. 第四轮系统/安全 Review（2026-11-05）
+
+### 22.1 结论
+
+默认 loopback、本机单用户、受信样例模型下 **无 Critical**。发现并修复 5 个 High：
+
+1. `launch` 在初始 stop 已到但 snapshot 未就绪时可能返回 `snapshot=None`，
+   静默破坏核心闭环；现在 fail-closed 并释放 GDB；
+2. MI reader 永久失败/异常退出时，等待中的 command future 不会立即失败，
+   session 可能假装存活到 10s 超时；现在立即以 `MIError` 唤醒；
+3. cancel 发生在 initial stop 之后或 snapshot 等待中时可能保留 GDB；
+   launch/step/continue/interrupt 的取消路径现在统一清理；
+4. DWARF 变量名或样本路径中的换行/控制字符可能打破 MI 行边界；现在拒绝
+   控制字符，变量被跳过而不是转发；
+5. 被放弃的 session 没有空闲回收，关闭标签页后 GDB/inferior 可长期残留；
+   新增无 WS 活动 session 的 idle reaper（默认 1800s）。
+
+### 22.2 逐项结论
+
+| 检查项 | 结论 |
+|---|---|
+| 真实 GDB / mock | 真实 GDB/MI3；真实集成测试未删除、未 mock 成功路径 |
+| token/响应/stop 错配 | 单 reader + token future + 独立通知队列；无发现错配；pending future 现在可被失败唤醒 |
+| GDB 泄漏 | 正常 DELETE/取消/退出/reader 失败/reaper 均清理；SIGKILL 仍可能留下 GDB（Medium） |
+| session 串行 | `asyncio.Lock` + 状态门控；launch 等待 stop/snapshot 期间的并发动作被状态拒绝/锁住 |
+| 64-bit | 后端 hex string；前端 BigInt；无 Number 地址 |
+| 不可读内存 | `null` + readable=false + unreadable_ranges；不伪造 0 |
+| RBP 假设 | frames 用 GDB unwinder；变量用 variable objects；Explanation 明确不假定固定 RBP |
+| 未知 qword | 只有 call/ret 在实测匹配时才称为返回地址；不生成变量语义 |
+| shell/路径/命令 | 无 shell；白名单动作；sample ID/路径校验；MI 控制字符拒绝；`stop_at` 正则 |
+| WS 跨 session | 按 session ID 路由、独立队列；知道 ID 的本机客户端可访问（无认证，Medium） |
+| 错误恢复 | 终态保护、reader 失败、取消、reaper、DELETE retry；SIGKILL/TTL 之外的残留见 Medium |
+| 测试 | 123 backend / 25 frontend / 真实 E2E；真实 GDB 测试保留 |
+
+### 22.3 仍为 Medium
+
+- 无用户认证；session ID 即 bearer，WS 可访问已知 ID 的 session；
+- `PWNVIZ_ALLOW_REMOTE=1` 时无认证，暴露后等价于远程 GDB 控制；
+- 后端 `SIGKILL` 无 PDEATHSIG；容器化/GDB supervisor 仍待做；
+- WS 无应用层 heartbeat；有 WS 的 session 不参与 idle reaper；
+- 本地反向代理会让 remote 请求呈现为 loopback，绕过 LocalOnlyMiddleware；
+- 固定宽度侧栏/无 CI/无 50-step 压力测试；
+- `gdb` 命令/读取的超时可能阻塞 event loop 数秒（close 同步等待）。
+
+### 22.4 验证
+
+- 后端新增：pending reader、launch snapshot 缺失、launch snapshot 取消、
+  MI 控制字符、idle reaper；
+- 后端：`123 passed, 1 warning in 144.79s`；
+- 前端：`25 passed`，build 302.09 kB；
+- E2E 真实 GDB：`snap #1 → #2`、changedCells=1、RSP `e210→e200→e210`、
+  Exited、Restart、Variables provenance、layout collapse。

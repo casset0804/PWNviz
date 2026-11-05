@@ -155,6 +155,7 @@ class MIController:
         # a synchronous finally block so cancellation of the owning request/task
         # cannot leave GDB or its process group behind.
         self._closed = True
+        self._fail_pending("GDB controller closed")
         reader = self._reader_task
         self._reader_task = None
         try:
@@ -228,6 +229,17 @@ class MIController:
         self._events.put_nowait(
             {"type": "output", "stream": stream, "text": text}
         )
+
+    def _fail_pending(self, message: str) -> None:
+        """Wake commands immediately when the reader/process is gone.
+
+        Waiting for the normal command timeout here would leave a session
+        looking alive for up to ten seconds after a permanent MI failure.
+        """
+        for token, future in list(self._pending.items()):
+            if not future.done():
+                future.set_exception(MIError(message))
+            self._pending.pop(token, None)
 
     async def execute(
         self,
@@ -326,6 +338,7 @@ class MIController:
             return
         self._fatal_error = f"MI reader failed: {message}"
         self._state = "error"
+        self._fail_pending(self._fatal_error)
         await self._notify_state()
         self._events.put_nowait(
             {"type": "error", "message": self._fatal_error}
@@ -337,6 +350,7 @@ class MIController:
         self._state = "exited"
         self._exit_epoch += 1
         self._exit_code = self._exit_code or "unknown"
+        self._fail_pending("GDB process exited before the command completed")
         await self._notify_state()
         self._events.put_nowait(
             {"type": "exited", "reason": "gdb-process-exited", "exit_code": self._exit_code}

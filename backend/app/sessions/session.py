@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import re
 import secrets
+import time
 from collections import deque
 from pathlib import Path
 
@@ -74,7 +75,10 @@ EXEC_COMMANDS = {
 
 
 def quote_mi_path(path: Path) -> str:
-    text = str(path).replace("\\", "\\\\").replace('"', '\\"')
+    text = str(path)
+    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in text):
+        raise DebuggerError("Sample path contains control characters.")
+    text = text.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{text}"'
 
 
@@ -118,13 +122,26 @@ class DebugSession:
         self._session_warnings: list[str] = []
         self._breakpoints: list[dict] = []
         self._output_seq = 0
+        self._last_activity = time.monotonic()
 
     @staticmethod
     def new_id() -> str:
         return "sess_" + secrets.token_urlsafe(18)
 
+    def touch(self) -> None:
+        """Record user-visible activity for the idle-session reaper."""
+        self._last_activity = time.monotonic()
+
+    def idle_seconds(self, now: float | None = None) -> float:
+        return max(0.0, (time.monotonic() if now is None else now) - self._last_activity)
+
+    @property
+    def has_subscribers(self) -> bool:
+        return bool(self._subscribers)
+
     # ------------------------------------------------------------------ metadata
     def info(self) -> SessionInfo:
+        self.touch()
         return SessionInfo(
             session_id=self.session_id,
             sample_id=self.sample.id,
@@ -143,6 +160,7 @@ class DebugSession:
         return self._last_snapshot
 
     def list_snapshots(self) -> list[Snapshot]:
+        self.touch()
         return list(self.snapshots)
 
     # ------------------------------------------------------------------ pub/sub
@@ -152,10 +170,12 @@ class DebugSession:
         # recover the latest state from its initial REST/WS snapshot.
         queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=SUBSCRIBER_QUEUE_MAX)
         self._subscribers.add(queue)
+        self.touch()
         return queue
 
     def unsubscribe(self, queue: asyncio.Queue[dict]) -> None:
         self._subscribers.discard(queue)
+        self.touch()
 
     def initial_events(self) -> list[dict]:
         events = [self._state_event()]
@@ -239,6 +259,7 @@ class DebugSession:
 
     # ------------------------------------------------------------------ lifecycle
     async def launch(self) -> Snapshot | None:
+        self.touch()
         async with self._lock:
             if self.state is not SessionState.CREATED:
                 raise SessionStateError(
@@ -313,9 +334,26 @@ class DebugSession:
                 f"GDB did not stop at {self.stop_at!r}: {exc}"
             ) from exc
 
-        return await self._wait_for_snapshot(
-            seq_before, self.settings.gdb_stop_timeout_seconds
-        )
+        try:
+            snapshot = await self._wait_for_snapshot(
+                seq_before, self.settings.gdb_stop_timeout_seconds
+            )
+        except asyncio.CancelledError:
+            await self._fail_session(
+                "Launch cancelled while collecting the initial snapshot"
+            )
+            raise
+        if snapshot is None:
+            if self.state in {
+                SessionState.EXITED,
+                SessionState.ERROR,
+                SessionState.TERMINATED,
+            }:
+                return None
+            message = "Initial stop arrived but the snapshot was not ready in time."
+            await self._fail_session(message)
+            raise DebuggerTimeoutError(message)
+        return snapshot
 
     async def _abort_launch(self, controller: MIController, exc: Exception) -> None:
         if self.state is SessionState.TERMINATED:
@@ -348,7 +386,7 @@ class DebugSession:
         )
 
     async def _fail_session(self, message: str) -> None:
-        if self.state is SessionState.TERMINATED:
+        if self.state in {SessionState.TERMINATED, SessionState.EXITED}:
             return
         self.last_error = message
         self._closed = True
@@ -372,6 +410,7 @@ class DebugSession:
         return await self.launch()
 
     async def _step(self, command: str) -> tuple[SessionState, Snapshot | None]:
+        self.touch()
         async with self._lock:
             self._require_stopped()
             controller = self._controller()
@@ -382,6 +421,9 @@ class DebugSession:
                 await controller.execute(
                     command, timeout=self.settings.gdb_command_timeout_seconds
                 )
+            except asyncio.CancelledError:
+                await self._fail_session(f"{command} cancelled while sending")
+                raise
             except MIError as exc:
                 self.last_error = str(exc)
                 if controller.state == "stopped" and not self._closed:
@@ -398,6 +440,9 @@ class DebugSession:
             await controller.wait_for_stop(
                 epochs, timeout=self.settings.gdb_stop_timeout_seconds
             )
+        except asyncio.CancelledError:
+            await self._fail_session(f"{command} cancelled while waiting for stop")
+            raise
         except TargetExited:
             await self._wait_until_terminal(3.0)
             return self.state, None
@@ -409,9 +454,13 @@ class DebugSession:
                 f"No stop event after {command}: {exc}"
             ) from exc
 
-        snapshot = await self._wait_for_snapshot(
-            seq_before, self.settings.gdb_stop_timeout_seconds
-        )
+        try:
+            snapshot = await self._wait_for_snapshot(
+                seq_before, self.settings.gdb_stop_timeout_seconds
+            )
+        except asyncio.CancelledError:
+            await self._fail_session(f"{command} cancelled while collecting snapshot")
+            raise
         if snapshot is None:
             if self.state in {
                 SessionState.EXITED,
@@ -425,6 +474,7 @@ class DebugSession:
         return self.state, snapshot
 
     async def continue_execution(self) -> tuple[SessionState, Snapshot | None]:
+        self.touch()
         async with self._lock:
             self._require_stopped()
             controller = self._controller()
@@ -435,6 +485,9 @@ class DebugSession:
                     "-exec-continue",
                     timeout=self.settings.gdb_command_timeout_seconds,
                 )
+            except asyncio.CancelledError:
+                await self._fail_session("Continue cancelled while sending")
+                raise
             except MIError as exc:
                 self.last_error = str(exc)
                 if controller.state == "stopped" and not self._closed:
@@ -450,6 +503,7 @@ class DebugSession:
             return self.state, snapshot
 
     async def interrupt(self) -> tuple[SessionState, Snapshot | None]:
+        self.touch()
         async with self._lock:
             if self.state is not SessionState.RUNNING:
                 raise SessionStateError(
@@ -461,6 +515,9 @@ class DebugSession:
                     "-exec-interrupt",
                     timeout=self.settings.gdb_command_timeout_seconds,
                 )
+            except asyncio.CancelledError:
+                await self._fail_session("Interrupt cancelled while sending")
+                raise
             except MIError as exc:
                 await self._fail_session(f"Interrupt failed: {exc}")
                 raise DebuggerError(f"Interrupt failed: {exc}") from exc
@@ -567,6 +624,7 @@ class DebugSession:
             await self._set_state(SessionState.STOPPED)
             if self.controller is None or self.collector is None:
                 return
+            self.touch()
             previous = self.snapshots[-1] if self.snapshots else None
             snapshot_id = self._next_snapshot_id
             try:

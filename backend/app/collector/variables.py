@@ -28,6 +28,10 @@ _QUOTED_RE = re.compile(r'"((?:\\.|[^"\\])*)"')
 
 
 def _mi_quote(text: str) -> str:
+    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in text):
+        # MI is line-oriented. A DWARF name or path expression containing a
+        # newline must never become a second GDB command.
+        raise ValueError("MI argument contains control characters")
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
@@ -128,7 +132,7 @@ class VariableCollector:
                     created_record = await controller.execute(
                         f"-var-create - * {_mi_quote(name)}"
                     )
-                except MIError as exc:
+                except (MIError, ValueError) as exc:
                     warnings.append(f"Variable {name!r} could not be created: {exc}")
                     continue
                 created_payload = created_record.get("payload") or {}
@@ -192,7 +196,14 @@ class VariableCollector:
                 f"-var-info-path-expression {var_name}"
             )
             candidate = (path_record.get("payload") or {}).get("path_expr")
-            if isinstance(candidate, str) and candidate:
+            if (
+                isinstance(candidate, str)
+                and candidate
+                and not any(
+                    ord(character) < 0x20 or ord(character) == 0x7F
+                    for character in candidate
+                )
+            ):
                 path = candidate
         except MIError:
             path = None
@@ -207,7 +218,7 @@ class VariableCollector:
                 address = _first_hex(
                     (address_record.get("payload") or {}).get("value")
                 )
-            except MIError as exc:
+            except (MIError, ValueError) as exc:
                 address_error = str(exc)
 
         if optimized:

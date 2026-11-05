@@ -74,7 +74,8 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
 - 本机安全护栏：非 loopback 绑定默认拒绝、HTTP/WS 非 loopback 客户端中间件、
   `Host` 白名单、跨站浏览器请求拒绝、CORS 收紧、子进程组超时清理；
 - 生命周期清理：DELETE/取消/退出/reader 失败均回收 GDB，WebSocket 队列有界；
-- 单元测试与真实环境集成测试（pytest 115 passed，含真实 GDB 会话与 MI 控制器测试、变量矩阵）；
+  无活动 WebSocket 的 session 默认空闲 30 分钟后由 reaper 回收；
+- 单元测试与真实环境集成测试（pytest 123 passed，含真实 GDB 会话与 MI 控制器测试、变量矩阵）；
 - CDP E2E：`scripts/ui_smoke.mjs` 真实跑通
   main → StepI → Step Into add_numbers → RSP 变化 → Finish → Continue 退出 →
   Restart，页面不刷新；前端单测 25 passed；
@@ -222,6 +223,8 @@ Memory Inspector 选择、汇编选择、Diff 标签与 Terminate，并输出截
 | `PWNVIZ_ALLOWED_HOSTS` | `127.0.0.1,localhost,testserver` | `Host` 头白名单 |
 | `PWNVIZ_GDB_ARGS` | `--quiet --nx --interpreter=mi3` | 持久 GDB 启动参数（自动移除 `--batch`） |
 | `PWNVIZ_GDB_STOP_TIMEOUT_SECONDS` | `15` | 等待 `*stopped` 的预算 |
+| `PWNVIZ_SESSION_IDLE_TIMEOUT_SECONDS` | `1800` | 无 WebSocket 的 session 空闲回收时间 |
+| `PWNVIZ_SESSION_REAPER_INTERVAL_SECONDS` | `30` | 空闲 session reaper 扫描间隔 |
 
 可选调优项（`PWNVIZ_*`：pwndbg 开关、命令超时、缓存 TTL、CORS、栈窗口、
 快照上限）见 [.env.example](.env.example)。旧的 `PWNVIZ_GDB_BINARY` /

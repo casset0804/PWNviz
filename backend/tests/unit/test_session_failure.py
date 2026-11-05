@@ -7,6 +7,8 @@ import asyncio
 import pytest
 
 from app.core.config import get_settings
+from app.core.errors import DebuggerError, DebuggerTimeoutError
+from app.debugger.mi_controller import Epochs, StopEvent
 from app.samples.registry import get_sample
 from app.sessions import session as session_module
 from app.sessions.session import DebugSession
@@ -37,6 +39,46 @@ class BlockingLaunchController(FakeController):
     async def close(self) -> None:
         await super().close()
         self.release.set()
+
+
+class NoSnapshotController(FakeController):
+    warnings: list[str] = []
+    inferior_pid = None
+    pid = 4242
+    state = "stopped"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.pid = 4242
+        self.stop_waiting = asyncio.Event()
+        self.stop_returned = asyncio.Event()
+
+    async def start(self) -> None:
+        return None
+
+    async def execute(self, command: str, **_kwargs) -> dict:
+        if command.startswith("-break-insert"):
+            return {
+                "type": "result",
+                "message": "done",
+                "payload": {"bkpt": {"number": "1", "addr": "0x401000"}},
+            }
+        return {"type": "result", "message": "done", "payload": {}}
+
+    def epochs(self) -> Epochs:
+        return Epochs(stop=0, exit=0)
+
+    async def wait_for_stop(self, _epochs, **_kwargs) -> StopEvent:
+        self.stop_waiting.set()
+        await self.stop_returned.wait()
+        return StopEvent(epoch=1, reason="breakpoint-hit", payload={})
+
+    async def next_event(self) -> dict:
+        await asyncio.Future()
+        raise AssertionError("unreachable")
+
+    async def close(self) -> None:
+        await super().close()
 
 
 async def test_fatal_error_releases_controller(make_settings) -> None:
@@ -93,4 +135,70 @@ async def test_cancelled_launch_closes_spawned_controller(
 
     assert fake.closed is True
     assert session.state is SessionState.ERROR
+    assert session.controller is None
+
+
+async def test_launch_without_initial_snapshot_fails_closed(
+    make_settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = make_settings(
+        samples_dir=get_settings().repo_root / "samples",
+        allowed_sample_dir=get_settings().repo_root / "samples",
+        gdb_stop_timeout_seconds=0.05,
+    )
+    sample = get_sample(settings.samples_dir, "stack-basic")
+    assert sample is not None
+    session = DebugSession(
+        session_id="sess_no_snapshot",
+        settings=settings,
+        sample=sample,
+        stop_at="main",
+        load_pwndbg_enabled=False,
+    )
+    fake = NoSnapshotController()
+    fake.stop_returned.set()
+    monkeypatch.setattr(
+        session_module, "MIController", lambda _settings: fake
+    )
+
+    with pytest.raises(DebuggerTimeoutError):
+        await session.launch()
+
+    assert session.state is SessionState.ERROR
+    assert fake.closed is True
+    assert session.controller is None
+    assert "snapshot was not ready" in (session.last_error or "")
+
+
+async def test_cancelled_launch_waiting_for_snapshot_releases_gdb(
+    make_settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = make_settings(
+        samples_dir=get_settings().repo_root / "samples",
+        allowed_sample_dir=get_settings().repo_root / "samples",
+    )
+    sample = get_sample(settings.samples_dir, "stack-basic")
+    assert sample is not None
+    session = DebugSession(
+        session_id="sess_cancel_snapshot",
+        settings=settings,
+        sample=sample,
+        stop_at="main",
+        load_pwndbg_enabled=False,
+    )
+    fake = NoSnapshotController()
+    fake.stop_returned.set()
+    monkeypatch.setattr(
+        session_module, "MIController", lambda _settings: fake
+    )
+
+    task = asyncio.create_task(session.launch())
+    await asyncio.wait_for(fake.stop_waiting.wait(), timeout=2)
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert session.state is SessionState.ERROR
+    assert fake.closed is True
     assert session.controller is None

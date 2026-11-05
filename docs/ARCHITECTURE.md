@@ -47,7 +47,7 @@
 | `app/debugger/mi_controller.py` | MI token、命令 future、单 reader、异步事件队列、停止/退出状态 | 已实现 |
 | `app/debugger/pwndbg_loader.py` | 可选 `source gdbinit.py`，失败仅 warning | 已实现 |
 | `app/sessions/session.py` | 单会话状态机、串行化动作、快照、订阅推送 | 已实现 |
-| `app/sessions/manager.py` | 会话注册表、数量上限、终止与 shutdown 清理 | 已实现 |
+| `app/sessions/manager.py` | 会话注册表、数量上限、空闲 reaper、终止与 shutdown 清理 | 已实现 |
 | `app/collector/*` | 寄存器、frames、RSP 内存分块、RIP 反汇编、快照组装 | 已实现 |
 | `app/analysis/diff.py` | 按地址的字节级 diff + 寄存器 diff | 已实现 |
 | `app/api/routes_sessions.py` | 会话 REST API | 已实现 |
@@ -137,7 +137,7 @@ app/debugger/
 └── pwndbg_loader.py    可选 source gdbinit.py，失败仅 warning
 
 app/sessions/
-├── manager.py          会话注册表、数量上限、terminate/shutdown
+├── manager.py          会话注册表、数量上限、idle reaper、terminate/shutdown
 ├── session.py          状态机 + asyncio.Lock 串行化 + 快照/订阅
 └── state.py            CREATED/INITIALIZING/READY/RUNNING/STOPPED/EXITED/ERROR/TERMINATED
 

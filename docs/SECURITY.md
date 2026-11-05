@@ -67,15 +67,19 @@ PWNviz 第一版是**本机单用户教学工具**：
 - 变量语义只在 DWARF/GDB variable objects 可用时展示；无 debug info 不猜测变量；
   pointer target 只做单层读取，单指针最多 64 字节、最多 16 个目标，目标不可读
   明确显示 invalid/unreadable；不自动跟随指针链。
+- 控制字符不进入 MI 行：DWARF 变量名和样本路径中的换行/CR 会被拒绝，避免把恶意
+  调试信息变成额外 GDB 命令。
+- 无活动 WebSocket 的 session 默认空闲 30 分钟后由 reaper 终止并回收 GDB；
+  `PWNVIZ_SESSION_IDLE_TIMEOUT_SECONDS` 可调。
 
 ## Phase 1 仍需注意
 
 - 没有用户认证：安全依赖 loopback 绑定、Host/Origin 校验、不可预测 session ID；
   任何能读取 session ID 的本机进程都可控制该会话；
-- 没有 session 空闲 TTL；异常退出（如后端 `SIGKILL`）时 GDB 子进程可能残留，
-  依赖下次启动/人工清理；容器化与 PDEATHSIG 属于后续加固；
+- 异常退出（如后端 `SIGKILL`）时 GDB 子进程可能残留，依赖下次启动/人工清理；
+  容器化与 PDEATHSIG 属于后续加固；
 - WebSocket 没有应用层 heartbeat；队列有界，但长期僵死的连接仍可能占用一个
-  subscriber，直到 TCP/ASGI 层发现断开；
+  subscriber，直到 TCP/ASGI 层发现断开（有 WS 的 session 不参与空闲回收）；
 - GDB 路径、启动参数、pwndbg 路径来自本地配置（不是 HTTP 输入），应视为管理员
   可信配置；
 - 被调试 ELF 仍是受信任教学程序，不提供沙箱隔离；

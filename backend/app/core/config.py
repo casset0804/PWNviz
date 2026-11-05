@@ -143,6 +143,8 @@ class Settings:
     gdb_stop_timeout_seconds: float = 15.0
     session_max_snapshots: int = 200
     session_max_active: int = 8
+    session_idle_timeout_seconds: float = 1800.0
+    session_reaper_interval_seconds: float = 30.0
     snapshot_max_frames: int = 32
     memory_chunk_size: int = 0x40
     disassembly_before: int = 0x20
@@ -230,6 +232,12 @@ def get_settings() -> Settings:
         ),
         session_max_snapshots=_env_int(("PWNVIZ_SESSION_MAX_SNAPSHOTS",), 200),
         session_max_active=_env_int(("PWNVIZ_SESSION_MAX_ACTIVE",), 8),
+        session_idle_timeout_seconds=_env_float(
+            ("PWNVIZ_SESSION_IDLE_TIMEOUT_SECONDS",), 1800.0
+        ),
+        session_reaper_interval_seconds=_env_float(
+            ("PWNVIZ_SESSION_REAPER_INTERVAL_SECONDS",), 30.0
+        ),
         snapshot_max_frames=_env_int(("PWNVIZ_SNAPSHOT_MAX_FRAMES",), 32),
         memory_chunk_size=_env_int(("PWNVIZ_MEMORY_CHUNK_SIZE",), 0x40),
         disassembly_before=_env_int(("PWNVIZ_DISASSEMBLY_BEFORE",), 0x20),

@@ -41,9 +41,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             "set PWNVIZ_ALLOW_REMOTE=1 only if this exposure is intentional.",
             settings.api_host,
         )
-    yield
-    logger.info("PWNviz backend shutting down; terminating debug sessions")
-    await session_manager.shutdown()
+    await session_manager.start(settings)
+    try:
+        yield
+    finally:
+        logger.info("PWNviz backend shutting down; terminating debug sessions")
+        await session_manager.shutdown()
 
 
 def create_app() -> FastAPI:
