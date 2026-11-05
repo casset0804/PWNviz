@@ -82,6 +82,13 @@ class SampleNotBuiltError(PwnvizError):
     code = "sample_not_built"
 
 
+class SampleSourceUnavailableError(PwnvizError):
+    """The sample source exists in the registry but could not be read safely."""
+
+    status_code = 500
+    code = "sample_source_unavailable"
+
+
 class DebuggerError(PwnvizError):
     """The debugger backend failed in a way the API reports as a gateway error."""
 

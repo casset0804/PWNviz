@@ -136,6 +136,11 @@ class VariableNode(BaseModel):
     type: str
     value: str | None = None
     address: str | None = None
+    # V1.2 additive field: DWARF type size in bytes, measured with
+    # ``-data-evaluate-expression sizeof(<path>)``. The graphical stack map
+    # needs the real byte extent of every variable; deriving it from the type
+    # string would be a guess. ``None`` means the size was not measured.
+    size_bytes: int | None = None
     location_kind: Literal[
         "memory", "register", "optimized_out", "unavailable", "unknown"
     ] = "unknown"

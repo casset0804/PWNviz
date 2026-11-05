@@ -17,6 +17,39 @@ PWNviz 已经是一个能真实启动 Linux ELF、通过持久 GDB/MI3 单步、
 
 ---
 
+## 1.2 V1.2 增量：图形化栈帧工作台（2026-11-05）
+
+V1.2 没有更换调试链路，也没有加入任何 mock 数据；它重做了前端信息架构，并把
+“真实栈帧边界”和“真实指针关系”作为一等视觉对象。
+
+- **双模式**：默认 Presentation（源码/汇编 + StackMapCanvas + 核心寄存器 +
+  单步讲解），可切 Developer（原 Disassembly/StackMemory/RegisterPanel/BottomDock）；
+  两种模式共用同一个 Zustand store；
+- **StackMapCanvas**：高地址在上、低地址在下，地址/大小来自真实 Snapshot；
+  帧边界用 RBP 链 + GDB unwinder 调用者 PC + 内存 qword 交叉验证；
+  无帧指针/入口帧/无 DWARF 都有显式降级；
+- **真实变量大小**：后端新增 `variables[].size_bytes`（GDB `sizeof`），
+  前端按真实字节数绘制块，不再靠类型字符串猜大小；
+- **指针连线**：仅当指针值与目标 DWARF 地址完全相等时绘制；NULL/未解析/
+  窗口外/不可读分别展示，悬停高亮，点击展开有界目标字节；
+- **变化动画**：直接消费 `diff.changed_bytes`，460ms 绿色 overlay，
+  `prefers-reduced-motion` 与动画开关可关闭；不延迟真实状态；
+- **中文教学语**：`push rbp` / `mov rbp,rsp` / `sub rsp,N` 等在实测一致后
+  追加简短中文解释；
+- **后端小增量**：样例源码只读接口 `GET /api/v1/samples/{id}/source`；
+  `size_bytes`；launch 时显式 `set backtrace past-main on`（否则 GDB 默认
+  只展开到 main，调用者帧缺失）；
+- **真实样例**：新增 `samples/pointer-basic`（`p=&a`、`q=&b`、NULL）；
+- **验证**：backend 141 passed；frontend 53 passed / 7 files；build 通过；
+  `scripts/ui_smoke.mjs` 在 1920×1080 + 真实 GDB 下 `ok: true`
+  （演示模式栈帧/源码/变化高亮 → 开发模式完整字节表与全流程）。
+
+仍未解决：调用者帧变量树（第 0 帧以外的 DWARF 变量未采集，图中保留真实原始
+内存并明确标注）；断点增删、快照时间轴、隔离/多用户。详细 UI 文档见
+[UI_V12.md](UI_V12.md)。
+
+---
+
 ## 1.1 V1.1 增量：性能与中英双语（2026-11-05）
 
 V1.1 没有更换技术栈、没有删除真实 GDB 链路、没有引入 mock 数据。它做了两件事：

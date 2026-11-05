@@ -56,12 +56,12 @@ export function BottomDock({
   return (
     <section
       className={`flex shrink-0 flex-col border-t border-[#1a2431] bg-[#0b1017] ${
-        bottomDockCollapsed ? "h-8" : "h-[clamp(9.5rem,21vh,15rem)]"
+        bottomDockCollapsed ? "h-10" : "h-[clamp(11rem,24vh,18rem)]"
       }`}
       aria-label={t("panels:dock.aria")}
       data-testid="bottom-dock"
     >
-      <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-[#1a2431] bg-[#090e15] px-2">
+      <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-[#1a2431] bg-[#090e15] px-2.5">
         {TABS.map((tab) => {
           const active = tab.id === bottomTab;
           const badge =
@@ -81,7 +81,7 @@ export function BottomDock({
                 if (bottomDockCollapsed) toggleBottomDock();
               }}
               aria-pressed={active}
-              className={`relative flex h-8 items-center gap-1.5 border-b px-2 font-mono text-[10px] transition-colors ${
+              className={`relative flex h-10 items-center gap-1.5 border-b px-2.5 font-mono text-[13.5px] transition-colors ${
                 active
                   ? "border-cyan-400/70 bg-[#0d151f] text-[#d5e2ef]"
                   : "border-transparent text-[#68798d] hover:bg-[#0d141d] hover:text-[#b6c5d6]"
@@ -89,7 +89,7 @@ export function BottomDock({
             >
               <span>{t(tab.labelKey)}</span>
               {badge !== null ? (
-                <span className="min-w-3 border border-emerald-500/20 bg-emerald-500/[0.08] px-1 text-[8px] leading-3 text-emerald-300">
+                <span className="min-w-4 border border-emerald-500/20 bg-emerald-500/[0.08] px-1 text-[11px] leading-4 text-emerald-300">
                   {badge}
                 </span>
               ) : null}
@@ -110,7 +110,7 @@ export function BottomDock({
               ? t("panels:dock.expandDock")
               : t("panels:dock.collapseDock")
           }
-          className="ml-auto grid h-6 w-6 place-items-center border border-[#202c3b] bg-[#0d141d] font-mono text-[11px] leading-none text-[#718297] hover:border-[#3a4b60] hover:text-[#c6d3e2]"
+          className="ml-auto grid h-8 w-8 place-items-center rounded-sm border border-[#202c3b] bg-[#0d141d] font-mono text-[14px] leading-none text-[#8397ab] hover:border-[#3a4b60] hover:text-[#c6d3e2]"
         >
           {bottomDockCollapsed ? "▲" : "▼"}
         </button>

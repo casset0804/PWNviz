@@ -12,7 +12,7 @@
  * dynamic measurement is exactly what must *not* happen here (it would shift
  * rows under the user's cursor while stepping).
  */
-export const ROW_HEIGHT_PX = 22;
+export const ROW_HEIGHT_PX = 30;
 export const VIRTUALIZATION_THRESHOLD = 200;
 export const VIRTUAL_OVERSCAN = 8;
 

@@ -84,6 +84,28 @@ async def test_unknown_sample_returns_structured_error(client: AsyncClient) -> N
     assert "stack-basic" in body["error"]["detail"]["available"]
 
 
+async def test_sample_source_returns_real_demo_c(client: AsyncClient) -> None:
+    response = await client.get("/api/v1/samples/stack-basic/source")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sample_id"] == "stack-basic"
+    assert body["source_file"].endswith("demo.c")
+    assert body["language"] == "c"
+    assert body["truncated"] is False
+    assert "add_numbers" in body["content"]
+    assert body["line_count"] >= 10
+
+
+async def test_unknown_sample_source_returns_structured_error(
+    client: AsyncClient,
+) -> None:
+    response = await client.get("/api/v1/samples/does-not-exist/source")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "sample_not_found"
+
+
 @pytest.mark.skipif(shutil.which("gdb") is None, reason="GDB not installed on host")
 async def test_capabilities_probe_real_gdb(client: AsyncClient) -> None:
     response = await client.get("/api/v1/capabilities")

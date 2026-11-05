@@ -28,9 +28,9 @@ body {
   background-color: var(--pwn-bg);
   color: var(--pwn-text);
   font-family:
-    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
-    sans-serif;
-  font-size: 13px;
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei",
+    "PingFang SC", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -50,13 +50,13 @@ samp,
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #29384a;
-  border-radius: 2px;
+  background: #2b3d51;
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -88,22 +88,144 @@ samp,
 @media (min-width: 1024px) {
   .debug-layout {
     display: grid;
-    grid-template-columns: 305px minmax(0, 1fr) 245px;
+    grid-template-columns: 380px minmax(0, 1fr) 300px;
     overflow: hidden;
   }
 
   .debug-layout.left-collapsed {
-    grid-template-columns: 34px minmax(0, 1fr) 245px;
+    grid-template-columns: 44px minmax(0, 1fr) 300px;
   }
 
   .debug-layout.right-collapsed {
-    grid-template-columns: 305px minmax(0, 1fr) 34px;
+    grid-template-columns: 380px minmax(0, 1fr) 44px;
   }
 
   .debug-layout.left-collapsed.right-collapsed {
-    grid-template-columns: 34px minmax(0, 1fr) 34px;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
   }
 }
+
+/* --------------------------------------------------------------------------
+   V1.2 presentation surfaces
+   -------------------------------------------------------------------------- */
+
+.stack-map-unknown {
+  background-color: rgba(9, 15, 23, 0.72);
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(90, 112, 136, 0.10) 0,
+    rgba(90, 112, 136, 0.10) 1px,
+    transparent 1px,
+    transparent 9px
+  );
+}
+
+.stack-map-unreadable {
+  background-color: rgba(30, 12, 18, 0.72);
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(251, 113, 133, 0.16) 0,
+    rgba(251, 113, 133, 0.16) 2px,
+    transparent 2px,
+    transparent 7px
+  );
+}
+
+.stack-map-quiet {
+  background-color: rgba(6, 11, 17, 0.86);
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(70, 90, 112, 0.10) 0,
+    rgba(70, 90, 112, 0.10) 1px,
+    transparent 1px,
+    transparent 14px
+  );
+}
+
+@keyframes pwnviz-memory-flash {
+  0% {
+    background-color: rgba(16, 185, 129, 0.34);
+    box-shadow: inset 0 0 0 1px rgba(110, 231, 183, 0.65);
+  }
+  55% {
+    background-color: rgba(16, 185, 129, 0.18);
+  }
+  100% {
+    background-color: rgba(16, 185, 129, 0.09);
+    box-shadow: inset 0 0 0 1px rgba(110, 231, 183, 0.18);
+  }
+}
+
+.memory-change-flash {
+  animation: pwnviz-memory-flash 460ms ease-out both;
+  background-color: rgba(16, 185, 129, 0.09);
+}
+
+@keyframes pwnviz-marker-cue {
+  0% {
+    filter: brightness(1.45);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+  }
+  100% {
+    filter: brightness(1);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+  }
+}
+
+.stack-marker-changed {
+  animation: pwnviz-marker-cue 480ms ease-out both;
+}
+
+details > summary {
+  list-style: none;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* --------------------------------------------------------------------------
+   Developer mode: lift the legacy IDE panels to readable teaching sizes.
+   The old components still use a few 7-10px utility classes for dense data;
+   these scoped overrides raise them without duplicating every component.
+   -------------------------------------------------------------------------- */
+.developer-chrome .text-\[7px\] {
+  font-size: 11px !important;
+  line-height: 1.35;
+}
+
+.developer-chrome .text-\[8px\] {
+  font-size: 11.5px !important;
+  line-height: 1.35;
+}
+
+.developer-chrome .text-\[9px\] {
+  font-size: 12.5px !important;
+  line-height: 1.35;
+}
+
+.developer-chrome .text-\[10px\] {
+  font-size: 13.5px !important;
+  line-height: 1.35;
+}
+
+.developer-chrome .text-\[11px\] {
+  font-size: 14px !important;
+  line-height: 1.4;
+}
+
+.developer-chrome .text-\[12px\] {
+  font-size: 14px !important;
+  line-height: 1.4;
+}
+
 
 @keyframes pwnviz-byte-changed {
   0% {
@@ -162,6 +284,11 @@ samp,
   }
 
   .byte-cell-changed {
+    animation: none;
+  }
+
+  .memory-change-flash,
+  .stack-marker-changed {
     animation: none;
   }
 }

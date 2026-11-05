@@ -22,12 +22,17 @@ import { resolve } from "node:path";
 const APP_URL = process.env.PWNVIZ_APP_URL ?? "http://127.0.0.1:5173";
 const API_URL = (process.env.PWNVIZ_API_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 const CDP_URL = (process.env.PWNVIZ_CDP_URL ?? "http://127.0.0.1:9223").replace(/\/$/, "");
-const SHOT_PATH = resolve(process.env.PWNVIZ_SHOT ?? "docs/assets/workbench-phase2.png");
+const SHOT_PATH = resolve(
+  process.env.PWNVIZ_SHOT ?? "docs/assets/workbench-v12-developer.png",
+);
 const ZH_SHOT_PATH = resolve(
-  process.env.PWNVIZ_ZH_SHOT ?? "docs/assets/workbench-zh-cn.png",
+  process.env.PWNVIZ_ZH_SHOT ?? "docs/assets/workbench-v12-zh-cn.png",
 );
 const VAR_SHOT_PATH = resolve(
-  process.env.PWNVIZ_VAR_SHOT ?? "docs/assets/workbench-variables.png",
+  process.env.PWNVIZ_VAR_SHOT ?? "docs/assets/workbench-v12-variables.png",
+);
+const PRES_SHOT_PATH = resolve(
+  process.env.PWNVIZ_PRES_SHOT ?? "docs/assets/workbench-v12-presentation.png",
 );
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
@@ -153,8 +158,8 @@ async function main() {
     // which would stall the RSP auto-centering assertions below.
     await client.send("Page.bringToFront");
     await client.send("Emulation.setDeviceMetricsOverride", {
-      width: 1680,
-      height: 1050,
+      width: 1920,
+      height: 1080,
       deviceScaleFactor: 1,
       mobile: false,
     });
@@ -212,6 +217,17 @@ async function main() {
     assert(englishStatus === "Stopped" || englishStatus === "Idle", `english UI did not update: ${englishStatus}`);
     const languageFlow = { defaultLocale: "zh-CN", switched: "en-US", storedLocale };
 
+    // The default sample is stack-basic; set it explicitly so this acceptance
+    // flow never depends on directory ordering now that pointer-basic exists.
+    const sampleSelected = await client.evaluate(`(() => {
+      const select = document.querySelector('[data-testid="sample-select"]');
+      if (!select) return false;
+      select.value = 'stack-basic';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return select.value;
+    })()`);
+    assert(sampleSelected === "stack-basic", `sample selection failed: ${sampleSelected}`);
+
     await waitFor(
       client,
       "Run enabled",
@@ -259,6 +275,138 @@ async function main() {
       `document.querySelector('[data-testid="restart"]')?.disabled ?? null`,
     );
 
+    // ---- V1.2 presentation mode: real graphical stack map -------------------
+    await waitFor(
+      client,
+      "presentation mode",
+      `document.querySelector('[data-testid="workbench"]')?.getAttribute('data-mode') === 'presentation'`,
+      10_000,
+    );
+    await waitFor(
+      client,
+      "stack frame card",
+      `document.querySelectorAll('[data-testid="stack-frame-card"]').length > 0`,
+      20_000,
+    );
+    await waitFor(
+      client,
+      "stack map variable blocks",
+      `document.querySelectorAll('[data-testid="stack-map-block"][data-kind="variable"]').length > 0`,
+      20_000,
+    );
+    await waitFor(
+      client,
+      "real source lines",
+      `document.querySelectorAll('[data-testid="source-line"]').length > 0`,
+      20_000,
+    );
+
+    const presentationBefore = await client.evaluate(`(() => {
+      const text = (selector) => document.querySelector(selector)?.textContent?.trim() ?? '';
+      const attr = (selector, name) => document.querySelector(selector)?.getAttribute(name) ?? '';
+      return {
+        mode: document.querySelector('[data-testid="workbench"]')?.getAttribute('data-mode'),
+        rip: attr('[data-testid="register-rip"]', 'data-value'),
+        rsp: attr('[data-testid="register-rsp"]', 'data-value'),
+        rbp: attr('[data-testid="register-rbp"]', 'data-value'),
+        frames: document.querySelectorAll('[data-testid="stack-frame-card"]').length,
+        frameFunctions: Array.from(document.querySelectorAll('[data-testid="stack-frame-card"]')).map((node) => node.getAttribute('data-function')),
+        variableBlocks: document.querySelectorAll('[data-testid="stack-map-block"][data-kind="variable"]').length,
+        rspMarker: attr('[data-testid="stack-map-rsp"]', 'data-address'),
+        rbpMarker: attr('[data-testid="stack-map-rbp"]', 'data-address'),
+        sourceCurrent: document.querySelector('[data-testid="source-line"][data-current="true"]')?.getAttribute('data-line') ?? null,
+        instruction: text('[data-testid="current-instruction"]'),
+        canvasHeight: document.querySelector('[data-testid="stack-map-scroll"]')?.clientHeight ?? 0,
+        canvasScrollHeight: document.querySelector('[data-testid="stack-map-scroll"]')?.scrollHeight ?? 0,
+      };
+    })()`);
+    assert(presentationBefore.mode === "presentation", `default mode is not presentation: ${presentationBefore.mode}`);
+    assert(presentationBefore.frames > 0, "presentation mode drew no real stack frame");
+    assert(presentationBefore.variableBlocks > 0, "presentation mode drew no DWARF variable blocks");
+    assert(presentationBefore.rspMarker.startsWith("0x"), `RSP marker missing: ${presentationBefore.rspMarker}`);
+    assert(presentationBefore.rbpMarker.startsWith("0x"), `RBP marker missing: ${presentationBefore.rbpMarker}`);
+    assert(
+      presentationBefore.rspMarker === presentationBefore.rsp,
+      `RSP marker does not match the register: ${presentationBefore.rspMarker} != ${presentationBefore.rsp}`,
+    );
+    assert(presentationBefore.sourceCurrent !== null, "real source line was not highlighted");
+    assert(presentationBefore.canvasHeight > 300, `stack map viewport too short: ${presentationBefore.canvasHeight}`);
+
+    const presRipBefore = presentationBefore.rip;
+    await client.evaluate(`document.querySelector('[data-testid="step-instruction"]').click()`);
+    await waitFor(
+      client,
+      "presentation step RIP change",
+      `(() => {
+        const value = document.querySelector('[data-testid="register-rip"]')?.getAttribute('data-value');
+        const state = document.querySelector('[data-testid="debug-state"]')?.getAttribute('data-state') ?? '';
+        return Boolean(value && value !== ${JSON.stringify(presRipBefore)}) && state === 'STOPPED';
+      })()`,
+      45_000,
+    );
+    const presentationAfter = await client.evaluate(`(() => {
+      const attr = (selector, name) => document.querySelector(selector)?.getAttribute(name) ?? '';
+      return {
+        rip: attr('[data-testid="register-rip"]', 'data-value'),
+        frames: document.querySelectorAll('[data-testid="stack-frame-card"]').length,
+        changedBlocks: document.querySelectorAll('[data-testid="stack-map-block"][data-changed="true"]').length,
+        changedCount: attr('[data-testid="stack-map-changed-count"]', 'data-testid') ? 1 : 0,
+        teachingMatched: document.querySelector('[data-testid="teaching-panel"]')?.getAttribute('data-matched'),
+        instruction: document.querySelector('[data-testid="current-instruction"]')?.textContent?.trim() ?? '',
+      };
+    })()`);
+    assert(presentationAfter.rip !== presRipBefore, "presentation step did not change RIP");
+    assert(presentationAfter.changedBlocks > 0, "presentation step did not highlight a changed memory block");
+    assert(
+      presentationAfter.teachingMatched === "true",
+      `verified teaching explanation missing after step: ${presentationAfter.teachingMatched}`,
+    );
+    assert(presentationAfter.instruction.includes("RIP"), "current instruction band did not render");
+
+    const presentationShot = await client.send("Page.captureScreenshot", {
+      format: "png",
+      captureBeyondViewport: false,
+    });
+    writeFileSync(PRES_SHOT_PATH, Buffer.from(presentationShot.data, "base64"));
+
+    // Clicking a real memory block must fill the detail panel with real bytes.
+    await client.evaluate(
+      `document.querySelector('[data-testid="stack-map-block"][data-kind="variable"]').click()`,
+    );
+    const selectedDetail = await waitFor(
+      client,
+      "selected block detail",
+      `document.querySelector('[data-testid="selected-block-detail"]')?.textContent ?? ''`,
+      10_000,
+    );
+    assert(selectedDetail.includes("0x"), "selected memory block detail has no address/bytes");
+
+    // The source/disassembly tabs both use real data.
+    await client.evaluate(
+      `document.querySelector('[data-testid="source-tab-disassembly"]').click()`,
+    );
+    await waitFor(
+      client,
+      "presentation disassembly lines",
+      `document.querySelectorAll('[data-testid="disassembly-line"]').length > 0`,
+      10_000,
+    );
+
+    // ---- V1.2 developer mode: the original IDE surface is preserved --------
+    await client.evaluate(`document.querySelector('[data-testid="mode-developer"]').click()`);
+    await waitFor(
+      client,
+      "developer workbench",
+      `Boolean(document.querySelector('[data-testid="developer-workbench"]'))`,
+      10_000,
+    );
+    await waitFor(
+      client,
+      "developer stack rows",
+      `document.querySelectorAll('[data-testid="stack-row"]').length > 0`,
+      10_000,
+    );
+
     await client.evaluate(`document.querySelector('[data-testid="tab-variables"]').click()`);
     await waitFor(
       client,
@@ -270,6 +418,10 @@ async function main() {
       `document.querySelector('[data-testid="variables-panel"]')?.textContent ?? ''`,
     );
     assert(variablesText.includes("dwarf") && variablesText.includes("debug-info"), "variable provenance missing");
+    // Center the real RSP before the docs screenshot so the byte table and the
+    // DWARF provenance are visible together.
+    await client.evaluate(`document.querySelector('[data-testid="register-rsp"]').click()`);
+    await sleep(350);
     const variablesShot = await client.send("Page.captureScreenshot", {
       format: "png",
       captureBeyondViewport: false,
@@ -321,7 +473,7 @@ async function main() {
     await waitFor(
       client,
       "dock collapsed",
-      `(document.querySelector('[data-testid="bottom-dock"]')?.getBoundingClientRect().height ?? 999) < 40`,
+      `(document.querySelector('[data-testid="bottom-dock"]')?.getBoundingClientRect().height ?? 999) < 48`,
       5_000,
     );
     await client.evaluate(`document.querySelector('[data-testid="dock-toggle"]').click()`);
@@ -606,7 +758,7 @@ async function main() {
         const status = document.querySelector('[data-testid="status-state"]')?.getAttribute('data-state') ?? '';
         const rip = document.querySelector('[data-testid="register-rip"]')?.getAttribute('data-value') ?? '';
         const snap = document.querySelector('[data-testid="snapshot-id"]')?.textContent ?? '';
-        return status === 'STOPPED' && rip === ${JSON.stringify(before.rip)} && snap.includes('#1');
+        return status === 'STOPPED' && rip === ${JSON.stringify(presentationBefore.rip)} && snap.includes('#1');
       })()`,
       60_000,
     );
@@ -617,7 +769,43 @@ async function main() {
     sessionId = newSessionId;
     const restarted = true;
 
-    // Terminate the restarted session through the UI.
+    // Live Simplified Chinese presentation screenshot for the docs. The
+    // restarted session is still real and stopped at main here.
+    await switchLocale("zh-CN");
+    await client.evaluate(`document.querySelector('[data-testid="mode-presentation"]').click()`);
+    await waitFor(
+      client,
+      "zh presentation stack map",
+      `Boolean(document.querySelector('[data-testid="stack-map-canvas"]')) && document.querySelectorAll('[data-testid="stack-frame-card"]').length > 0`,
+      20_000,
+    );
+    await waitFor(
+      client,
+      "zh presentation source",
+      `document.querySelectorAll('[data-testid="source-line"]').length > 0`,
+      20_000,
+    );
+    await waitFor(
+      client,
+      "zh RSP marker inside the stack viewport",
+      `(() => {
+        const scroll = document.querySelector('[data-testid="stack-map-scroll"]');
+        const rsp = document.querySelector('[data-testid="stack-map-rsp"]');
+        if (!scroll || !rsp) return false;
+        const s = scroll.getBoundingClientRect();
+        const r = rsp.getBoundingClientRect();
+        return r.top >= s.top && r.bottom <= s.bottom;
+      })()`,
+      10_000,
+    );
+    await sleep(300);
+    const zhShot = await client.send("Page.captureScreenshot", {
+      format: "png",
+      captureBeyondViewport: false,
+    });
+    writeFileSync(ZH_SHOT_PATH, Buffer.from(zhShot.data, "base64"));
+
+    // Terminate the restarted session through the UI (works in both modes).
     await waitFor(
       client,
       "Terminate enabled after restart",
@@ -649,13 +837,7 @@ async function main() {
     );
     assert(reloadedStatus === "空闲", `locale did not survive reload: ${reloadedStatus}`);
     languageFlow.persistedAfterReload = true;
-
-    // Screenshot of the default (Simplified Chinese) workbench for the docs.
-    const zhShot = await client.send("Page.captureScreenshot", {
-      format: "png",
-      captureBeyondViewport: false,
-    });
-    writeFileSync(ZH_SHOT_PATH, Buffer.from(zhShot.data, "base64"));
+    languageFlow.zhPresentationScreenshot = ZH_SHOT_PATH;
 
     console.log(
       JSON.stringify(
@@ -673,6 +855,13 @@ async function main() {
           variablesHaveProvenance:
             variablesText.includes("dwarf") && variablesText.includes("debug-info"),
           variablesScreenshot: VAR_SHOT_PATH,
+          presentationScreenshot: PRES_SHOT_PATH,
+          zhScreenshot: ZH_SHOT_PATH,
+          presentation: {
+            before: presentationBefore,
+            after: presentationAfter,
+            selectedDetail: selectedDetail.slice(0, 240),
+          },
           layoutCollapse: { stackWidthBefore, stackWidthAfter },
           restartDisabled,
           rspVisible,

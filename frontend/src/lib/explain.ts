@@ -222,6 +222,13 @@ export function explainStep(
             value: sourceBefore,
           }),
         );
+        // Teaching sentence, only after the pushed qword was measured equal to
+        // the register it came from. It never claims a frame layout.
+        lines.push(
+          t("lines.pushSavedRegister", {
+            register: sourceRegister.toUpperCase(),
+          }),
+        );
       }
       return {
         headline: t("headline.push"),
@@ -277,6 +284,8 @@ export function explainStep(
   if (mnemonic === "mov") {
     const destination = operandList(operands)[0] ?? "";
     const destRegister = destination.replace(/^\$/, "").toLowerCase();
+    const sourceOperand = operandList(operands)[1] ?? "";
+    const sourceRegister = sourceOperand.replace(/^\$/, "").trim().toLowerCase();
     const before =
       destRegister in previous.registers ? previous.registers[destRegister] : null;
     const after =
@@ -290,6 +299,17 @@ export function explainStep(
           after: after ?? "—",
         }),
       );
+    }
+    // `mov rbp, rsp` is the common frame-base setup. Only call it a frame base
+    // when the measured new RBP really equals the previous RSP.
+    if (
+      destRegister === "rbp" &&
+      sourceRegister === "rsp" &&
+      after !== null &&
+      previousRsp !== null &&
+      after === previousRsp
+    ) {
+      lines.push(t("lines.movFrameBase", { value: after }));
     }
     lines.push(t("lines.movBytes", { count: current.diff.changed_bytes.length }));
     return {
@@ -309,16 +329,27 @@ export function explainStep(
     const expectedDelta =
       immediate === null ? null : mnemonic === "sub" ? -immediate : immediate;
     if (expectedDelta !== null && rspDelta === expectedDelta) {
+      const lines = [
+        t("lines.stackPointerDelta", {
+          delta: signedHexDelta(currentRsp, previousRsp) ?? t("facts.notAvailable"),
+        }),
+      ];
+      // The immediate matched the measured RSP delta, so the reserved/released
+      // byte count is measured, not assumed. It still does not claim that the
+      // whole RSP..RBP gap is one variable.
+      if (immediate !== null) {
+        lines.push(
+          t(mnemonic === "sub" ? "lines.stackPointerReserved" : "lines.stackPointerReleased", {
+            bytes: immediate.toString(),
+          }),
+        );
+      }
+      lines.push(t("lines.stackPointerNoFrame"));
       return {
         headline: t("headline.stackPointer", { mnemonic }),
         rule: `${mnemonic} rsp`,
         matched: true,
-        lines: [
-          t("lines.stackPointerDelta", {
-            delta: signedHexDelta(currentRsp, previousRsp) ?? t("facts.notAvailable"),
-          }),
-          t("lines.stackPointerNoFrame"),
-        ],
+        lines,
         facts: facts(),
       };
     }

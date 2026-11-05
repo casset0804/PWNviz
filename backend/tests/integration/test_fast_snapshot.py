@@ -87,6 +87,23 @@ async def _launch() -> tuple[SessionManager, object, Snapshot]:
     return manager, session, snapshot
 
 
+async def test_launch_unwinds_past_main_for_the_stack_map() -> None:
+    """GDB's default `backtrace past-main off` must be overridden.
+
+    Without it the launch snapshot only contains `main`, so the graphical stack
+    map cannot cross-check main's frame boundary against the libc caller.
+    """
+    manager, session, first = await _launch()
+    try:
+        assert first.frames[0].function == "main"
+        assert len(first.frames) >= 3, [frame.function for frame in first.frames]
+        assert any(
+            "libc" in (frame.function or "").lower() for frame in first.frames[1:]
+        ), [frame.function for frame in first.frames]
+    finally:
+        await manager.shutdown()
+
+
 async def test_single_step_reports_real_register_and_byte_diff() -> None:
     manager, session, first = await _launch()
     try:

@@ -50,7 +50,7 @@ export const RegisterPanel = memo(function RegisterPanel({
       className="min-w-0"
       onCollapse={onCollapse}
       actions={
-        <span className="inline-flex items-center gap-1 font-mono text-[8px] uppercase tracking-[0.1em] text-[#66788c]">
+        <span className="inline-flex items-center gap-1 font-mono text-[12px] uppercase tracking-[0.06em] text-[#7f93a8]">
           <span
             className={`h-1.5 w-1.5 ${snapshot ? "bg-emerald-400" : "bg-slate-600"}`}
             aria-hidden="true"
@@ -66,7 +66,7 @@ export const RegisterPanel = memo(function RegisterPanel({
       <div className="space-y-2.5 p-2">
         {REGISTER_GROUPS.map((group) => (
           <div key={group.key}>
-            <h3 className="mb-1 flex items-center gap-1.5 font-mono text-[8px] uppercase tracking-[0.18em] text-[#4e5f73]">
+            <h3 className="mb-1.5 flex items-center gap-1.5 font-mono text-[12px] uppercase tracking-[0.10em] text-[#71859a]">
               <span>{t(`panels:registers.${group.key}`)}</span>
               <span className="h-px flex-1 bg-[#151f2b]" aria-hidden="true" />
             </h3>
@@ -97,7 +97,7 @@ export const RegisterPanel = memo(function RegisterPanel({
                             })
                           : t("panels:registers.snapshotTitle", { register })
                       }
-                      className={`w-full px-1.5 py-[3px] text-left font-mono text-[10px] leading-[14px] transition-colors odd:bg-[#0e151e] ${
+                      className={`w-full px-2 py-1.5 text-left font-mono text-[14px] leading-5 transition-colors odd:bg-[#0e151e] ${
                         isMarker
                           ? `cursor-pointer hover:bg-[#141f2b] ${tone.bg}`
                           : "cursor-default disabled:cursor-default"
@@ -118,7 +118,7 @@ export const RegisterPanel = memo(function RegisterPanel({
                         </span>
                       </span>
                       {isChanged ? (
-                        <span className="mt-0.5 flex items-baseline justify-between gap-2 text-[8px]">
+                        <span className="mt-1 flex items-baseline justify-between gap-2 text-[11.5px]">
                           <span className="uppercase tracking-[0.1em] text-emerald-400/70">
                             {t("panels:registers.changed")}
                           </span>
@@ -140,7 +140,7 @@ export const RegisterPanel = memo(function RegisterPanel({
           </div>
         ))}
 
-        <div className="border-t border-[#1a2431] pt-1.5 font-mono text-[8px] leading-4 text-[#4e5f73]">
+        <div className="border-t border-[#1a2431] pt-2 font-mono text-[12px] leading-5 text-[#71859a]">
           {t("panels:registers.footer")}
         </div>
       </div>

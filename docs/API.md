@@ -205,6 +205,9 @@ credentials；跨站浏览器请求在到达路由前被拒绝；`Host` 头受�
 扫描 `samples/*/demo.c`，读取 `README.md` 的首个标题与首段作为标题/描述，
 并报告二进制是否存在（不执行）。
 
+> V1.2 增加第二个真实教学样例 `pointer-basic`（`p = &a`、`q = &b`、`NULL`），
+> 用于验证栈帧图中的指针连线；旧的 `stack-basic` 仍是默认主样例。
+
 实测响应：
 
 ```json
@@ -237,6 +240,27 @@ credentials；跨站浏览器请求在到达路由前被拒绝；`Host` 头受�
 
 返回单个 `SampleInfo`。`sample_id` 必须匹配 `^[a-z0-9][a-z0-9._-]{0,63}$`，
 不存在时返回 404 `sample_not_found`。
+
+## GET `/api/v1/samples/{sample_id}/source`
+
+V1.2 新增：返回某个教学样例的**真实源文件文本**，用于演示模式的
+“源码 / 汇编”切换。路径不来自客户端，而是由样例注册表解析，并再次校验必须位于
+`ALLOWED_SAMPLE_DIR` 内；只读、限长（512 KiB），不会执行任何内容。
+
+```json
+{
+  "sample_id": "stack-basic",
+  "source_file": "/mnt/f/Pwnvis/samples/stack-basic/demo.c",
+  "language": "c",
+  "content": "#include <stdio.h>\n...",
+  "line_count": 15,
+  "truncated": false
+}
+```
+
+不存在或越界返回 404 `sample_not_found`；文件存在但读取失败返回
+500 `sample_source_unavailable`。前端在接口不可用时明确显示“源码不可用”，
+不会伪造源码。
 
 ---
 
@@ -483,6 +507,13 @@ GDB 启动/命令失败 → `502 debugger_error`，会话进入 `ERROR` 并回�
       "function": "main",
       "file": "/.../samples/stack-basic/demo.c",
       "line": 11
+    },
+    {
+      "level": 1,
+      "address": "0x00007ffff7c29d90",
+      "function": "__libc_start_call_main",
+      "file": "../sysdeps/nptl/libc_start_call_main.h",
+      "line": 58
     }
   ],
   "instruction": {
@@ -530,6 +561,7 @@ GDB 启动/命令失败 → `502 debugger_error`，会话进入 `ERROR` 并回�
       "type": "int",
       "value": "42",
       "address": "0x00007fffffffe234",
+      "size_bytes": 4,
       "location_kind": "memory",
       "source": "dwarf",
       "confidence": "debug-info",
@@ -595,6 +627,15 @@ GDB 启动/命令失败 → `502 debugger_error`，会话进入 `ERROR` 并回�
 > 地址来自 GDB variable objects；`target_source=gdb-memory` 表示 pointer target
 > 字节来自单次、最多 64 字节的 GDB 内存读取。`kind` 是从 GDB type 语法派生的
 > 展示分类，不是从 raw qword 猜测的变量。
+
+> V1.2 新增 `variables[].size_bytes`：由 GDB `sizeof(<path>)` 实测的字节数，
+> 供图形化栈帧图按真实大小绘制内存块；未测量时为 `null`，前端不会用类型字符串
+> 猜造大小，只有原始类型才回退到 ABI 推断并标注 `≈ ABI`。
+
+> V1.2 起 session 启动时显式执行 `set backtrace past-main on`。GDB 在 `--nx`
+> 且未加载用户 init 时默认停在 `main`，调用者帧会缺失；开启后 `frames` 会包含
+> `__libc_start_call_main` 等真实调用者，供栈帧图与 unwinder 交叉验证。该设置
+> 只改变展开深度，不伪造任何帧。
 
 > 示例来自本机真实会话，`rows`/`disassembly` 为简洁只保留相关行。
 > 完整快照包含 `rsp-0x80 .. rsp+0x180` 的 64 行（上限受配置约束）。

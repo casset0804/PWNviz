@@ -22,6 +22,8 @@ export type BottomTab =
   | "log";
 export type StreamStatus = "closed" | "connecting" | "open" | "reconnecting";
 export type LogLevel = "info" | "event" | "error" | "gdb";
+/** V1.2: presentation is the default teaching surface; developer keeps the IDE. */
+export type WorkbenchMode = "presentation" | "developer";
 
 export interface LogEntry {
   id: number;
@@ -60,6 +62,7 @@ interface DebugStore {
   pointerTarget: PointerTargetView | null;
   scrollTarget: ScrollTarget | null;
   animationsEnabled: boolean;
+  workbenchMode: WorkbenchMode;
   streamStatus: StreamStatus;
   busy: boolean;
   error: string | null;
@@ -71,12 +74,14 @@ interface DebugStore {
 
   setSelectedSampleId: (sampleId: string | null) => void;
   setBottomTab: (tab: BottomTab) => void;
+  setWorkbenchMode: (mode: WorkbenchMode) => void;
   toggleLeftPanel: () => void;
   toggleRightPanel: () => void;
   toggleBottomDock: () => void;
   dismissError: () => void;
   toggleAnimations: () => void;
   selectByte: (address: string) => void;
+  clearByteSelection: () => void;
   selectInstruction: (address: string) => void;
   jumpToPointer: (node: VariableNode) => void;
   requestScroll: (address: string) => void;
@@ -185,6 +190,16 @@ function readAnimationPreference(): boolean {
   }
 }
 
+function readWorkbenchMode(): WorkbenchMode {
+  try {
+    return window.localStorage.getItem("pwnviz.mode") === "developer"
+      ? "developer"
+      : "presentation";
+  } catch {
+    return "presentation";
+  }
+}
+
 function stripAnsi(value: string): string {
   return value.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
 }
@@ -238,6 +253,7 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
   pointerTarget: null,
   scrollTarget: null,
   animationsEnabled: readAnimationPreference(),
+  workbenchMode: readWorkbenchMode(),
   streamStatus: "closed",
   busy: false,
   error: null,
@@ -253,6 +269,14 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
   },
 
   setBottomTab: (bottomTab) => set({ bottomTab }),
+  setWorkbenchMode: (workbenchMode) => {
+    set({ workbenchMode });
+    try {
+      window.localStorage.setItem("pwnviz.mode", workbenchMode);
+    } catch {
+      // The mode switch still works for this page if storage is unavailable.
+    }
+  },
   toggleLeftPanel: () =>
     set((state) => ({ leftPanelCollapsed: !state.leftPanelCollapsed })),
   toggleRightPanel: () =>
@@ -277,6 +301,12 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
       selectedByteAddress: address,
       selectedInstructionAddress: null,
       bottomTab: "memory",
+    }),
+
+  clearByteSelection: () =>
+    set({
+      selectedByteAddress: null,
+      pointerTarget: null,
     }),
 
   selectInstruction: (address) =>
@@ -417,6 +447,7 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
         breakpoints: [],
         lastAction: null,
         lastOutputSeq: 0,
+        selectedSampleId: session.sample_id,
         selectedByteAddress: null,
         selectedInstructionAddress: null,
         pointerTarget: null,

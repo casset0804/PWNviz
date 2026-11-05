@@ -96,7 +96,7 @@ export function StatusBar() {
 
   return (
     <div
-      className="flex h-7 shrink-0 items-center gap-2 overflow-hidden border-b border-[#1a2431] bg-[#090e15] px-3 font-mono text-[10px] text-[#718196]"
+      className="flex h-8 shrink-0 items-center gap-2 overflow-hidden border-b border-[#1a2431] bg-[#090e15] px-4 font-mono text-[12px] text-[#7f93a8]"
       data-testid="status-bar"
     >
       <span className="inline-flex shrink-0 items-center gap-1.5" title={debuggerState}>

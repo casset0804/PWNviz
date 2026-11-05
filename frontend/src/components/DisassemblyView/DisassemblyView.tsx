@@ -38,7 +38,7 @@ export const DisassemblyView = memo(function DisassemblyView({
       className="min-w-0"
       onCollapse={onCollapse}
       actions={
-        <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-[#6f8ba0]">
+        <span className="font-mono text-[12px] uppercase tracking-[0.06em] text-[#8195aa]">
           <span
             className={`mr-1 inline-block h-1.5 w-1.5 ${rip ? "bg-cyan-400" : "bg-slate-600"}`}
             aria-hidden="true"
@@ -52,7 +52,7 @@ export const DisassemblyView = memo(function DisassemblyView({
           <div className="shrink-0 border-b border-[#1a2431] border-l-2 border-l-cyan-400/60 bg-[#0b131c] px-2.5 py-1.5">
             <div className="flex items-center gap-2">
               <span
-                className="min-w-0 flex-1 truncate font-mono text-[10px] text-[#b8d9ea]"
+                className="min-w-0 flex-1 truncate font-mono text-[14px] text-[#c5e3f3]"
                 data-testid="current-instruction"
                 title={`${instruction.address} ${instruction.text ?? instruction.mnemonic ?? ""}`}
               >
@@ -61,11 +61,11 @@ export const DisassemblyView = memo(function DisassemblyView({
                   {instruction.text ?? instruction.mnemonic}
                 </span>
               </span>
-              <span className="shrink-0 font-mono text-[9px] text-[#526477]">
+              <span className="shrink-0 font-mono text-[12px] text-[#6f849a]">
                 {instruction.bytes ?? "—"}
               </span>
             </div>
-            <div className="mt-1 flex min-w-0 items-center gap-2 font-mono text-[9px] text-[#5f7186]">
+            <div className="mt-1 flex min-w-0 items-center gap-2 font-mono text-[12px] text-[#7f93a8]">
               <span className="truncate">
                 {instruction.function ?? t("panels:disassembly.unknownFunction")}
               </span>
@@ -82,10 +82,10 @@ export const DisassemblyView = memo(function DisassemblyView({
         <div className="min-h-0 flex-1 overflow-auto">
           {lines.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center">
-              <span className="border border-[#263447] px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-[#6e8095]">
+              <span className="border border-[#263447] px-2.5 py-1 font-mono text-[13px] uppercase tracking-[0.08em] text-[#91a5ba]">
                 {t("panels:disassembly.empty")}
               </span>
-              <p className="max-w-xs text-[10px] leading-4 text-[#617186]">
+              <p className="max-w-xs text-[13px] leading-5 text-[#7f93a8]">
                 {t("panels:disassembly.emptyHint")}
               </p>
             </div>
@@ -112,7 +112,7 @@ export const DisassemblyView = memo(function DisassemblyView({
                       if (lineAddress) selectInstruction(line.address);
                     }}
                     title={line.function ? `${line.function} · ${line.text}` : line.text}
-                    className={`grid w-full grid-cols-[8.2rem_1.15rem_minmax(0,1fr)] items-center gap-1.5 border-l-2 py-[3px] pr-2 text-left font-mono text-[10px] leading-[15px] transition-colors ${
+                    className={`grid w-full grid-cols-[9rem_1.25rem_minmax(0,1fr)] items-center gap-2 border-l-2 py-1.5 pr-2 text-left font-mono text-[13.5px] leading-5 transition-colors ${
                       isCurrent
                         ? "border-l-cyan-400/70 bg-cyan-500/[0.055] text-[#c7e8f4]"
                         : "border-l-transparent text-[#9aa9ba] hover:bg-[#111a25] hover:text-[#d5e0eb]"
@@ -123,7 +123,7 @@ export const DisassemblyView = memo(function DisassemblyView({
                     >
                       {line.address}
                     </span>
-                    <span className="flex items-center gap-0.5 text-[9px]">
+                    <span className="flex items-center gap-0.5 text-[12px]">
                       {isCurrent ? (
                         <span
                           className="text-cyan-300"
@@ -148,7 +148,7 @@ export const DisassemblyView = memo(function DisassemblyView({
           )}
         </div>
 
-        <div className="shrink-0 border-t border-[#1a2431] px-2.5 py-1 font-mono text-[8px] uppercase tracking-[0.08em] text-[#4d5e72]">
+        <div className="shrink-0 border-t border-[#1a2431] px-3 py-1.5 font-mono text-[12px] uppercase tracking-[0.06em] text-[#6a7f95]">
           {t("panels:disassembly.footer")}
         </div>
       </div>

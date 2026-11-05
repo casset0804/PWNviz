@@ -349,6 +349,23 @@ class DebugSession:
                         enabled=self.load_pwndbg_enabled,
                     )
                 )
+                # GDB stops unwinding at `main` by default when no user init has
+                # changed `backtrace past-main` (the backend deliberately runs
+                # with --nx and may skip pwndbg). The graphical stack map needs
+                # the real caller frames above main to cross-check frame
+                # boundaries, so enable it explicitly *after* any pwndbg init so
+                # that init cannot overwrite it. This changes only how far GDB
+                # unwinds; no frame is fabricated.
+                try:
+                    await controller.execute(
+                        '-interpreter-exec console "set backtrace past-main on"',
+                        timeout=self.settings.gdb_command_timeout_seconds,
+                    )
+                except MIError as exc:
+                    self._session_warnings.append(
+                        "Could not enable `backtrace past-main`; caller frames "
+                        f"above main may be missing: {exc}"
+                    )
                 await controller.execute(
                     f"-file-exec-and-symbols {quote_mi_path(self.sample.binary_file)}",
                     timeout=self.settings.gdb_command_timeout_seconds,

@@ -43,6 +43,18 @@ from app.schemas.snapshot import (
 )
 
 
+def previous_mnemonic(previous: Snapshot | None) -> str | None:
+    """Mnemonic of the instruction that led to this stop, if it is known.
+
+    ``previous.instruction`` is ``None`` whenever disassembly failed for that
+    stop, so the snapshot itself existing is not enough evidence. Returning
+    ``None`` lets the frame collector fall back to the safety interval instead
+    of aborting the whole snapshot.
+    """
+    instruction = previous.instruction if previous is not None else None
+    return instruction.mnemonic if instruction is not None else None
+
+
 class SnapshotCollector:
     """Collect registers, frames, disassembly, memory and diff for one stop."""
 
@@ -91,7 +103,7 @@ class SnapshotCollector:
 
         # ------------------------------------------------------------- frames
         frames: list[FrameModel] = []
-        previous_mnemonic = previous.instruction.mnemonic if previous else None
+        previous_instruction_mnemonic = previous_mnemonic(previous)
         frame_result = None
         with perf.measure("frames", controller.perf):
             try:
@@ -99,7 +111,7 @@ class SnapshotCollector:
                     controller,
                     snapshot_id=snapshot_id,
                     action=action,
-                    previous_mnemonic=previous_mnemonic,
+                    previous_mnemonic=previous_instruction_mnemonic,
                     stop_reason=stop_reason,
                     force=mode == "full",
                 )
@@ -170,7 +182,10 @@ class SnapshotCollector:
                 variable_result = await self.variables.collect(
                     controller,
                     mode=mode,
-                    has_debug_file=any(frame.file for frame in frames),
+                    # Debug info is a property of the *current* frame; a libc
+                    # caller frame with source paths must not make a stripped
+                    # current function look like it has DWARF locals.
+                    has_debug_file=bool(frames and frames[0].file),
                     frame_key=frame_key,
                     frame_changed=frame_changed,
                     snapshot_id=snapshot_id,

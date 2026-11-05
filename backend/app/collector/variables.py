@@ -55,6 +55,20 @@ def _first_hex(text: object) -> str | None:
     return normalize_hex(token)
 
 
+def _first_int(text: object) -> int | None:
+    """Parse the leading integer GDB prints for ``sizeof`` (decimal or hex)."""
+    if not isinstance(text, str):
+        return None
+    token = text.strip().split(None, 1)[0] if text.strip() else ""
+    if not token:
+        return None
+    try:
+        value = int(token, 16) if token.lower().startswith("0x") else int(token, 10)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
 def _kind_for(type_name: str) -> str:
     lower = type_name.lower().strip()
     if "*" in lower:
@@ -112,6 +126,7 @@ class _VarEntry:
     type: str
     value: str | None
     address: str | None
+    size_bytes: int | None
     location_kind: str
     kind: str
     is_argument: bool
@@ -133,6 +148,7 @@ class _VarEntry:
             if self.location_kind in {"optimized_out", "unavailable"}
             else self.value,
             address=self.address,
+            size_bytes=self.size_bytes,
             location_kind=self.location_kind,  # type: ignore[arg-type]
             source="dwarf",
             confidence="debug-info",
@@ -510,12 +526,28 @@ class VariableCollector:
             type=type_name,
             value=None if optimized or synthetic else value,
             address=address,
+            size_bytes=None,
             location_kind=location_kind,
             kind=kind,
             is_argument=is_argument,
             frame_level=frame_level,
             depth=depth,
         )
+
+        # The graphical stack map needs the real byte extent of every top-level
+        # variable. Only DWARF (via GDB) can answer this exactly, so measure it
+        # instead of inferring a size from the type string. One extra MI command
+        # per root variable, only when the tree is (re)built.
+        if path and depth == 0:
+            try:
+                size_record = await controller.execute(
+                    f"-data-evaluate-expression {_mi_quote(f'sizeof({path})')}"
+                )
+                entry.size_bytes = _first_int(
+                    (size_record.get("payload") or {}).get("value")
+                )
+            except (MIError, ValueError):
+                entry.size_bytes = None
 
         if kind == "string":
             children = await self._children(controller, var_name)

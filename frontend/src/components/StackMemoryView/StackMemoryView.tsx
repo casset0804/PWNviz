@@ -26,7 +26,7 @@ import type { MemoryChange, StackRow } from "../../types/debug";
 import { Panel } from "../common/Panel";
 
 const STACK_GRID =
-  "grid-cols-[8.7rem_repeat(8,1.55rem)_minmax(7.8rem,1fr)_minmax(4.2rem,0.65fr)_minmax(5.5rem,0.75fr)]";
+  "grid-cols-[9.5rem_repeat(8,2rem)_minmax(9.5rem,1fr)_minmax(6.5rem,0.7fr)_minmax(6.5rem,0.7fr)]";
 
 function prefersReducedMotion(): boolean {
   return (
@@ -139,7 +139,7 @@ const ByteCell = memo(function ByteCell({
         address,
         byte: byte ?? t("common:unreadable"),
       })}${markerTitle}${changeTitle}`}
-      className={`relative h-[18px] border border-[#1a2634] bg-[#0b111a] text-center font-mono text-[9px] leading-[16px] transition-colors ${
+      className={`relative h-[26px] border border-[#1a2634] bg-[#0b111a] text-center font-mono text-[14px] leading-[24px] transition-colors ${
         unreadable
           ? "byte-cell-unreadable text-[#7b6570]"
           : "text-[#b8c5d3] hover:border-[#4c6078] hover:bg-[#111c28]"
@@ -157,9 +157,9 @@ const ByteCell = memo(function ByteCell({
       {hasChange ? (
         <span
           aria-hidden="true"
-          className="absolute right-px top-px font-mono text-[7px] leading-none text-emerald-300/90"
+          className="absolute right-px top-px font-mono text-[10px] leading-none text-emerald-300/90"
         >
-          螖
+          Δ
         </span>
       ) : null}
     </button>
@@ -204,9 +204,9 @@ function StackRowViewImpl({
       data-testid="stack-row"
       data-row-address={row.address}
       data-readable={row.readable ? "true" : "false"}
-      className={`grid ${STACK_GRID} h-[22px] min-w-[700px] items-center gap-1 border-b border-l-2 border-b-[#121b26] px-2 font-mono ${rowTone}`}
+      className={`grid ${STACK_GRID} h-[30px] min-w-[900px] items-center gap-1 border-b border-l-2 border-b-[#121b26] px-2.5 font-mono ${rowTone}`}
     >
-      <span className="truncate text-[9px] text-[#65778c]" title={row.address}>
+      <span className="truncate text-[12.5px] text-[#778b9f]" title={row.address}>
         {row.address}
       </span>
       {row.bytes.map((byte, index) => {
@@ -232,7 +232,7 @@ function StackRowViewImpl({
         );
       })}
       <span
-        className="truncate text-[9px] text-[#aab8c8]"
+        className="truncate text-[12.5px] text-[#c3d2e1]"
         title={row.qword_le ?? t("common:unreadable")}
       >
         {row.qword_le ?? (
@@ -240,12 +240,12 @@ function StackRowViewImpl({
         )}
       </span>
       <span
-        className="truncate text-[9px] text-[#63758a]"
+        className="truncate text-[12.5px] text-[#7f93a8]"
         title={row.ascii ?? t("common:unreadable")}
       >
         {row.ascii ?? <span className="text-[#b97a86]">{t("common:unreadable")}</span>}
       </span>
-      <span className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[8px]">
+      <span className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[12px]">
         {markers.map((marker) => (
           <span
             key={`${marker.kind}-${marker.offset}`}
@@ -261,7 +261,7 @@ function StackRowViewImpl({
             className="text-emerald-300/90"
             title={t("panels:stack.changedCountTitle", { count: changedCount })}
           >
-            螖{changedCount}
+            Δ{changedCount}
             <span className="sr-only"> {t("common:changed")}</span>
           </span>
         ) : null}
@@ -519,7 +519,7 @@ export const StackMemoryView = memo(function StackMemoryView() {
       hint={t("panels:stack.hint")}
       className="min-w-0"
       actions={
-        <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-[#6c7d91]">
+        <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-[#8195aa]">
           {snapshot
             ? t("common:rowCount", { count: snapshot.stack.rows.length })
             : t("panels:stack.noSnapshot")}
@@ -527,7 +527,7 @@ export const StackMemoryView = memo(function StackMemoryView() {
       }
     >
       <div className="flex h-full min-h-0 flex-col" data-testid="stack-canvas">
-        <div className="flex h-6 shrink-0 items-center gap-3 overflow-hidden border-b border-[#1a2431] bg-[#0a0f15] px-2.5 font-mono text-[8px] uppercase tracking-[0.08em] text-[#5f7085]">
+        <div className="flex h-8 shrink-0 items-center gap-3 overflow-hidden border-b border-[#1a2431] bg-[#0a0f15] px-3 font-mono text-[12px] uppercase tracking-[0.06em] text-[#7c90a5]">
           <span className="inline-flex shrink-0 items-center gap-1">
             <span className="h-2 w-2 border border-[#f6ad55] bg-[#f6ad55]/15" aria-hidden="true" />
             RSP
@@ -537,7 +537,7 @@ export const StackMemoryView = memo(function StackMemoryView() {
             RBP
           </span>
           <span className="inline-flex shrink-0 items-center gap-1">
-            <span className="text-emerald-300">螖</span> {t("panels:stack.legendChanged")}
+            <span className="text-emerald-300">Δ</span> {t("panels:stack.legendChanged")}
           </span>
           <span className="inline-flex shrink-0 items-center gap-1">
             <span className="h-2 w-2 border border-dashed border-[#b97a86] bg-[#b97a86]/10" aria-hidden="true" />
@@ -552,18 +552,18 @@ export const StackMemoryView = memo(function StackMemoryView() {
 
         {!snapshot ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-            <span className="border border-[#2a394c] px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-[#76889c]">
+            <span className="border border-[#2a394c] px-2.5 py-1 font-mono text-[13px] uppercase tracking-[0.08em] text-[#96a9bd]">
               {hasSession
                 ? t("panels:stack.waiting")
                 : t("panels:stack.noSession")}
             </span>
-            <p className="max-w-md text-[10px] leading-4 text-[#617186]">
+            <p className="max-w-md text-[13px] leading-5 text-[#7f93a8]">
               {t("panels:stack.emptyBody")}
             </p>
           </div>
         ) : (
           <>
-            <div className="flex h-4 shrink-0 items-center justify-between px-3 font-mono text-[8px] uppercase tracking-[0.18em] text-[#4f6074]">
+            <div className="flex h-6 shrink-0 items-center justify-between px-3 font-mono text-[12px] uppercase tracking-[0.10em] text-[#6a7f95]">
               <span data-testid="high-address">{t("panels:stack.high")}</span>
               <span className="hidden text-[#3f4f61] sm:block">
                 {t("panels:stack.layout")}
@@ -571,17 +571,17 @@ export const StackMemoryView = memo(function StackMemoryView() {
             </div>
 
             {rsp && !rspInView ? (
-              <div className="mx-2 mb-1 border-l-2 border-[#f6ad55]/70 bg-[#f6ad55]/[0.045] px-2 py-1 font-mono text-[9px] text-[#e7b878]">
+              <div className="mx-2 mb-1 border-l-2 border-[#f6ad55]/70 bg-[#f6ad55]/[0.045] px-2.5 py-1.5 font-mono text-[12.5px] text-[#e7b878]">
                 {t("panels:stack.rspOutside", { address: rsp })}
               </div>
             ) : null}
             {rbp && !rbpInView ? (
-              <div className="mx-2 mb-1 border-l-2 border-[#7db8e8]/60 bg-[#7db8e8]/[0.04] px-2 py-1 font-mono text-[9px] text-[#a9c9e3]">
+              <div className="mx-2 mb-1 border-l-2 border-[#7db8e8]/60 bg-[#7db8e8]/[0.04] px-2.5 py-1.5 font-mono text-[12.5px] text-[#a9c9e3]">
                 {t("panels:stack.rbpOutside", { address: rbp })}
               </div>
             ) : null}
             {unreadableRanges.length > 0 ? (
-              <div className="mx-2 mb-1 border-l-2 border-[#fb7185]/40 bg-[#fb7185]/[0.035] px-2 py-1 font-mono text-[9px] text-[#d69aa4]">
+              <div className="mx-2 mb-1 border-l-2 border-[#fb7185]/40 bg-[#fb7185]/[0.035] px-2.5 py-1.5 font-mono text-[12.5px] text-[#d69aa4]">
                 {t("panels:stack.unreadableRanges", {
                   count: unreadableRanges.length,
                 })}
@@ -596,7 +596,7 @@ export const StackMemoryView = memo(function StackMemoryView() {
               data-testid="stack-scroll"
             >
               <div
-                className={`sticky top-0 z-10 grid ${STACK_GRID} h-6 min-w-[700px] items-center gap-1 border-b border-[#1a2431] bg-[#0a0f15] px-2 font-mono text-[8px] uppercase tracking-[0.08em] text-[#526477]`}
+                className={`sticky top-0 z-10 grid ${STACK_GRID} h-8 min-w-[900px] items-center gap-1 border-b border-[#1a2431] bg-[#0a0f15] px-2.5 font-mono text-[12px] uppercase tracking-[0.06em] text-[#71859a]`}
               >
                 <span>{t("panels:stack.colAddress")}</span>
                 {Array.from({ length: 8 }, (_, index) => (
@@ -628,7 +628,7 @@ export const StackMemoryView = memo(function StackMemoryView() {
               <div className="h-10" aria-hidden="true" />
             </div>
 
-            <div className="flex h-4 shrink-0 items-center justify-between px-3 font-mono text-[8px] uppercase tracking-[0.18em] text-[#4f6074]">
+            <div className="flex h-6 shrink-0 items-center justify-between px-3 font-mono text-[12px] uppercase tracking-[0.10em] text-[#6a7f95]">
               <span data-testid="low-address">{t("panels:stack.low")}</span>
               <span className="hidden text-[#3f4f61] sm:block">
                 {t("panels:stack.growsDown")}

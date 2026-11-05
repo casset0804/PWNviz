@@ -1,5 +1,5 @@
 import { translate } from "../i18n";
-import type { Capabilities, SamplesResponse } from "../types/api";
+import type { Capabilities, SampleSource, SamplesResponse } from "../types/api";
 import type {
   ActionName,
   ActionResponse,
@@ -103,6 +103,16 @@ export function fetchCapabilities(verifyPwndbg = false): Promise<Capabilities> {
 
 export function fetchSamples(): Promise<SamplesResponse> {
   return request<SamplesResponse>("/api/v1/samples");
+}
+
+/**
+ * Real source text for the presentation source panel. The backend resolves the
+ * path from the sample registry; the client never sends a filesystem path.
+ */
+export function fetchSampleSource(sampleId: string): Promise<SampleSource> {
+  return request<SampleSource>(
+    `/api/v1/samples/${encodeURIComponent(sampleId)}/source`,
+  );
 }
 
 export function createSession(input: {

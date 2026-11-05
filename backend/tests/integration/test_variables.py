@@ -104,6 +104,12 @@ async def test_debug_info_variables_and_complex_types(
     assert by_name["local_int"].value == "42"
     assert by_name["local_int"].location_kind == "memory"
     assert by_name["local_int"].address is not None
+    # V1.2: sizes come from DWARF ``sizeof``, not from the type string.
+    assert by_name["local_int"].size_bytes == 4
+    assert by_name["text"].size_bytes == 6
+    assert by_name["arr"].size_bytes == 12
+    assert by_name["p"].size_bytes == 8
+    assert by_name["ptr"].size_bytes == 8
 
     assert by_name["text"].kind == "string"
     assert by_name["text"].string_value == "hello"

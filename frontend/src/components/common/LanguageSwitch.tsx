@@ -7,26 +7,26 @@ import { SUPPORTED_LOCALES, setLocale, type Locale } from "../../i18n";
  * a user who cannot read the current UI can still find their language.
  */
 export function LanguageSwitch({ compact = false }: { compact?: boolean }) {
-  const { i18n, t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
   const current = i18n.language as Locale;
   const label = (locale: Locale) =>
     locale === "zh-CN" ? t("language.zh") : t("language.en");
 
   return (
     <label
-      className={`flex h-6 items-center gap-1 border border-[#253346] bg-[#0b1017] font-mono text-[9px] uppercase tracking-[0.08em] text-[#6b7c90] ${
-        compact ? "px-1" : "px-1.5"
+      className={`flex h-11 items-center gap-2 rounded-md border border-[#2b3d51] bg-[#0c1520] text-[12px] uppercase tracking-[0.06em] text-[#7f93a8] ${
+        compact ? "px-2" : "px-3"
       }`}
       title={t("language.current", { language: label(current) })}
       data-testid="language-switch-wrapper"
     >
-      <span className={compact ? "sr-only" : "hidden xl:inline"}>
+      <span className={compact ? "sr-only" : "hidden lg:inline"}>
         {t("language.label")}
       </span>
       <select
         value={current}
-        onChange={(event) => setLocale(event.target.value as Locale)}
-        className="h-5 cursor-pointer bg-transparent font-mono text-[10px] normal-case tracking-normal text-[#d0dbe7] outline-none"
+        onChange={(event) => void setLocale(event.target.value as Locale)}
+        className="h-8 cursor-pointer bg-transparent font-mono text-[13px] normal-case tracking-normal text-[#d7e4f0] outline-none"
         aria-label={t("language.label")}
         data-testid="language-switch"
       >

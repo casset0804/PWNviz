@@ -73,3 +73,12 @@ export interface SamplesResponse {
   count: number;
   samples: SampleInfo[];
 }
+
+export interface SampleSource {
+  sample_id: string;
+  source_file: string;
+  language: string;
+  content: string;
+  line_count: number;
+  truncated: boolean;
+}

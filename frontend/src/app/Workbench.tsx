@@ -1,13 +1,12 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import { BottomDock } from "../components/BottomDock/BottomDock";
-import { PanelRail } from "../components/common/PanelRail";
-import { DisassemblyView } from "../components/DisassemblyView/DisassemblyView";
-import { RegisterPanel } from "../components/RegisterPanel/RegisterPanel";
-import { StackMemoryView } from "../components/StackMemoryView/StackMemoryView";
+import { DeveloperWorkbench } from "../components/Developer/DeveloperWorkbench";
+import { CurrentInstruction } from "../components/Instruction/CurrentInstruction";
+import { PresentationWorkbench } from "../components/Presentation/PresentationWorkbench";
 import { StatusBar } from "../components/StatusBar/StatusBar";
-import { Toolbar } from "../components/Toolbar/Toolbar";
+import { ExecutionBar } from "../components/Toolbar/ExecutionBar";
+import { HeaderBar } from "../components/Toolbar/HeaderBar";
 import { useCapabilities } from "../hooks/useCapabilities";
 import { useSamples } from "../hooks/useSamples";
 import { useDebugStore } from "../stores/debugStore";
@@ -22,15 +21,14 @@ export function Workbench() {
   const error = useDebugStore((state) => state.error);
   const dismissError = useDebugStore((state) => state.dismissError);
   const attachSession = useDebugStore((state) => state.attachSession);
-  const leftPanelCollapsed = useDebugStore((state) => state.leftPanelCollapsed);
-  const rightPanelCollapsed = useDebugStore((state) => state.rightPanelCollapsed);
-  const toggleLeftPanel = useDebugStore((state) => state.toggleLeftPanel);
-  const toggleRightPanel = useDebugStore((state) => state.toggleRightPanel);
+  const mode = useDebugStore((state) => state.workbenchMode);
   const attachAttempted = useRef(false);
 
   useEffect(() => {
     if (!selectedSampleId && samples.length > 0) {
-      setSelectedSampleId(samples[0].id);
+      const preferred =
+        samples.find((sample) => sample.id === "stack-basic") ?? samples[0];
+      setSelectedSampleId(preferred.id);
     }
   }, [selectedSampleId, samples, setSelectedSampleId]);
 
@@ -44,65 +42,50 @@ export function Workbench() {
   }, [attachSession, session]);
 
   const connection = loading && !data ? "checking" : capabilityError ? "offline" : "online";
+  const ready = data?.ready ?? false;
 
   return (
-    <div className="flex h-screen min-h-0 flex-col bg-[#070a0f] text-[#c3cedb]" data-testid="workbench">
-      <Toolbar samples={samples} connection={connection} ready={data?.ready ?? false} />
+    <div
+      className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#070a0f] text-[#c3cedb]"
+      data-testid="workbench"
+      data-mode={mode}
+    >
+      <HeaderBar samples={samples} connection={connection} ready={ready} />
+      <ExecutionBar ready={ready} />
       <StatusBar />
+      {mode === "presentation" ? <CurrentInstruction /> : null}
 
       {error ? (
-        <div className="flex shrink-0 items-center gap-3 border-b border-rose-500/25 bg-rose-500/[0.07] px-3 py-1.5">
-          <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-rose-300">
+        <div className="flex shrink-0 items-center gap-3 border-b border-rose-500/25 bg-rose-500/[0.07] px-4 py-2">
+          <span className="shrink-0 text-[12px] font-semibold uppercase tracking-[0.12em] text-rose-300">
             {t("errors:title")}
           </span>
-          <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-rose-100/70" title={error}>
+          <span className="min-w-0 flex-1 truncate text-[13px] text-rose-100/80" title={error}>
             {error}
           </span>
           <button
             type="button"
             onClick={dismissError}
-            className="border border-rose-500/25 px-1.5 py-0.5 font-mono text-[9px] text-rose-300 hover:border-rose-300/60"
+            className="h-8 shrink-0 rounded-sm border border-rose-500/25 px-2.5 text-[12px] text-rose-300 transition-colors hover:border-rose-300/60"
           >
             {t("common:dismiss")}
           </button>
         </div>
       ) : null}
 
-      <main
-        className={`debug-layout min-h-0 flex-1 ${
-          leftPanelCollapsed ? "left-collapsed" : ""
-        } ${rightPanelCollapsed ? "right-collapsed" : ""}`}
-      >
-        {leftPanelCollapsed ? (
-          <PanelRail
-            label={t("panels:disassembly.title")}
-            side="left"
-            onExpand={toggleLeftPanel}
-          />
-        ) : (
-          <DisassemblyView onCollapse={toggleLeftPanel} />
-        )}
-        <StackMemoryView />
-        {rightPanelCollapsed ? (
-          <PanelRail
-            label={t("panels:registers.title")}
-            side="right"
-            onExpand={toggleRightPanel}
-          />
-        ) : (
-          <RegisterPanel onCollapse={toggleRightPanel} />
-        )}
-      </main>
-
-      <BottomDock
-        capabilities={data}
-        samples={samples}
-        error={capabilityError}
-        loading={loading}
-        verifying={verifying}
-        onRefresh={() => refresh()}
-        onVerifyPwndbg={() => refresh({ verifyPwndbg: true })}
-      />
+      {mode === "presentation" ? (
+        <PresentationWorkbench />
+      ) : (
+        <DeveloperWorkbench
+          capabilities={data}
+          samples={samples}
+          error={capabilityError}
+          loading={loading}
+          verifying={verifying}
+          onRefresh={() => refresh()}
+          onVerifyPwndbg={() => refresh({ verifyPwndbg: true })}
+        />
+      )}
     </div>
   );
 }

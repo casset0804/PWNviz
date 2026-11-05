@@ -14,7 +14,38 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
 
 ---
 
-## 当前状态：Phase 3 实时工作台 + Phase 4 变量语义 + V1.1 性能与中英双语
+## 当前状态：Phase 3 实时工作台 + Phase 4 变量语义 + V1.1 性能与中英双语 + V1.2 图形化栈帧
+
+### V1.2 亮点：从缩小的 IDE 到图形化内存教学工作台（2026-11-05）
+
+- **双模式共用同一真实数据源**：
+  - Presentation（默认）：源码/汇编 + **占主要视觉面积的 StackMapCanvas** +
+    核心寄存器 + 单步讲解；
+  - Developer：保留 DisassemblyView / StackMemoryView / RegisterPanel /
+    BottomDock / ASCII / QWORD / Byte Cell / MemoryInspector / DebugLog；
+  - 模式保存在 `localStorage["pwnviz.mode"]`，两种模式都只读 `useDebugStore`。
+- **真实图形化栈帧**：栈帧按高地址→低地址排列；帧边界由
+  **真实 RBP 链 + GDB unwinder 的调用者 PC + 真实内存 qword 交叉验证**，
+  不把 `RBP-RSP` 差值当作变量布局；函数入口、无帧指针、无 DWARF 都有明确降级。
+- **真实变量内存块**：后端新增 `variables[].size_bytes`（GDB `sizeof` 实测），
+  前端按真实字节数绘制；地址/间隙全部来自真实快照。
+- **真实指针关系**：只有 `p` 的值与 `&a` 的 DWARF 地址完全相等才画线；
+  NULL、未解析、栈窗口外、目标不可读分别显示；悬停高亮指针和目标，点击展开目标字节。
+- **单步变化动画**：直接使用 `diff.changed_bytes`；460ms 绿色高亮，支持
+  `prefers-reduced-motion` 和动画开关；动画不延迟真实状态更新。
+- **中文教学解释**：`push rbp` / `mov rbp,rsp` / `sub rsp,N` 等在 before/after
+  实测一致后追加简短中文说明（例如“预留 N 字节栈空间”），不预测未执行指令。
+- **投屏基线**：1920×1080 下验证；栈帧图约 60% 宽度、正文 13–18px、
+  关键按钮 46px；新增真实样例 `samples/pointer-basic` 用于指针连线。
+- 完整 UI 说明与截图：[docs/UI_V12.md](docs/UI_V12.md)。
+
+![V1.2 演示模式（真实 GDB 单步后）](docs/assets/workbench-v12-presentation.png)
+
+![V1.2 简体中文演示模式](docs/assets/workbench-v12-zh-cn.png)
+
+![V1.2 指针关系（pointer-basic）](docs/assets/workbench-v12-pointer.png)
+
+![V1.2 开发模式](docs/assets/workbench-v12-developer.png)
 
 ### V1.1 亮点（真实 GDB、真实 100 步实测）
 
@@ -55,7 +86,7 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
   架构判定（x86-64 门控）、pwndbg 安装检测 + 按需真实加载验证；
 - 公开配置 `GDB_PATH` / `PWNDBG_INIT` / `API_HOST` / `API_PORT` /
   `ALLOWED_SAMPLE_DIR`，GDB 缺失时后端仍可启动并返回 `unavailable`；
-- 内置样例 `samples/stack-basic/demo.c` 与编译脚本；
+- 内置样例 `samples/stack-basic/demo.c`、`samples/pointer-basic/demo.c` 与编译脚本；
 - **Phase 1 调试链路**：
   - 每会话一个持久 GDB/MI3 子进程（`GdbProcess` + `MIController`）；
   - MI token 关联命令响应，`*stopped`/`*running`/退出事件独立分发；
@@ -98,48 +129,56 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
   - 不耦合 pwndbg 私有模块；无 debug 信息时不做变量猜测；
 - React + TypeScript + Vite + Tailwind + Zustand 深色 IDE 工作台；
 - **视觉语言**：
-  - 石墨色低饱和 surface、1px 分隔线、等宽地址/寄存器；
+  - V1.2 演示模式：栈帧图为主体、大字号（正文 13–18px）、面板标题 18px、
+    46px 执行按钮；地址标尺/帧标签/变量块/指针 lane 精确对齐；
+  - V1.1 开发模式：石墨色低饱和 surface、1px 分隔线、等宽地址/寄存器；
   - Stack Canvas 优先宽度，左右面板和 Bottom Dock 可折叠；
   - RSP 橙色、RBP 蓝色、current RIP 青色、diff 绿色、unreadable 玫红，
     同时保留 RSP+0 / changed / unknown 等文字标签；
-  - 22px 栈行、sticky 列头、RSP 自动居中、reduce-motion 关闭动画和 smooth scroll；
-  - 1280×720 桌面验证；[1280 截图](docs/assets/workbench-1280.png)、
-    [折叠聚焦截图](docs/assets/workbench-1280-focus.png)；
+  - V1.2 开发模式栈行 30px、Byte Cell 14px、sticky 列头、RSP 自动居中、
+    reduce-motion 关闭动画和 smooth scroll；1920×1080 与 1280×720 均验证；
 - 本机安全护栏：非 loopback 绑定默认拒绝、HTTP/WS 非 loopback 客户端中间件、
   `Host` 白名单、跨站浏览器请求拒绝、CORS 收紧、子进程组超时清理；
 - 生命周期清理：DELETE/取消/退出/reader 失败均回收 GDB，WebSocket 队列有界；
   无活动 WebSocket 的 session 默认空闲 30 分钟后由 reaper 回收；
-- 单元测试与真实环境集成测试（pytest **135 passed**，含真实 GDB 会话与 MI 控制器测试、变量矩阵、
-  fast/full 快照契约、变量缓存与反汇编缓存）；
+- 单元测试与真实环境集成测试（pytest **141 passed**，含真实 GDB 会话与 MI 控制器测试、变量矩阵、
+  fast/full 快照契约、变量缓存、反汇编缓存、`sizeof` 变量大小、样例源码接口与
+  `backtrace past-main` 调用者帧）；
 - CDP E2E：`scripts/ui_smoke.mjs` 真实跑通
+  演示模式栈帧/源码/变化高亮 → 切开发模式 →
   main → StepI → Step Into add_numbers → RSP 变化 → Finish → Continue 退出 →
-  Restart，页面不刷新；并验证默认中文、切英文、刷新后语言保持；
-  前端单测 **38 passed**（含 i18n key 对齐、虚拟滚动窗口）；
+  Restart，页面不刷新；并验证默认中文、切英文、刷新后语言与模式保持；
+  前端单测 **53 passed / 7 files**（含 i18n key 对齐、栈帧布局、虚拟滚动窗口）；
 - 性能基线/回归脚本：`scripts/benchmark_stepping.py`（后端 100 步）、
   `scripts/perf_frontend.mjs`（真实 100 步的前端渲染）；
 - 环境检查脚本在本机 0 failure / 0 warning。
 
-![Phase 3 工作台（真实 GDB 会话）](docs/assets/workbench-phase2.png)
+![V1.2 演示模式（真实 GDB 会话）](docs/assets/workbench-v12-presentation.png)
 
-![Variables / DWARF 语义](docs/assets/workbench-variables.png)
+![V1.2 简体中文演示模式](docs/assets/workbench-v12-zh-cn.png)
 
-![1280×720 工作台](docs/assets/workbench-1280.png)
+![V1.2 指针关系](docs/assets/workbench-v12-pointer.png)
 
-![折叠两侧面板后的 Stack 聚焦](docs/assets/workbench-1280-focus.png)
+![V1.2 开发模式 / 完整字节表](docs/assets/workbench-v12-developer.png)
 
-![默认简体中文界面](docs/assets/workbench-zh-cn.png)
+![V1.2 Variables / DWARF 语义](docs/assets/workbench-v12-variables.png)
 
-> 默认界面为简体中文；Toolbar 右上角可切换 English（无需刷新，选择保存在
-> `localStorage["pwnviz.locale"]`）。
+![V1.1 1280×720 工作台（保留）](docs/assets/workbench-1280.png)
 
-> 截图来自真实 GDB 会话：RSP、RBP、RIP 与栈字节均来自后端 Snapshot；
-> 状态栏与断点来自 WebSocket 事件；高亮的 `0a` 是 StepI 后 diff 检测到的真实
-> 栈字节变化。
+![V1.1 折叠两侧面板后的 Stack 聚焦（保留）](docs/assets/workbench-1280-focus.png)
+
+> 默认界面为简体中文；HeaderBar 可切换 English（无需刷新，选择保存在
+> `localStorage["pwnviz.locale"]`），右上角切换演示/开发模式。
+
+> 截图来自真实 GDB 会话：RSP、RBP、RIP、帧边界、变量大小与栈字节均来自后端
+> Snapshot；状态栏与断点来自 WebSocket 事件；高亮的 `0a` 是 StepI 后 diff 检测到的
+> 真实栈字节变化；指针线只在真实地址完全相等时出现。
 
 尚未实现（后续阶段）：
 
-- 断点增删 API、源码视图；
+- 断点增删 API、源码行断点联动（V1.2 已提供只读源码视图）；
 - 更完整的 DWARF 类型/嵌套指针/容器语义；
+- 多 frame 变量树（当前演示模式的调用者帧保留真实原始内存并明确标注“未采集”）；
 - 快照历史时间轴回放；
 - 更完整的指令解释规则（当前只覆盖有限常用指令）；
 - 安全隔离（容器/非 root/禁网/资源限额）与多用户认证。

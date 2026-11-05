@@ -21,11 +21,11 @@ export function PanelRail({ label, side, onExpand }: PanelRailProps) {
         onClick={onExpand}
         title={t("expand", { title: label })}
         aria-label={t("expand", { title: label })}
-        className="grid h-6 w-6 place-items-center border border-[#202c3b] bg-[#0d141d] font-mono text-[12px] leading-none text-[#7f91a5] transition-colors hover:border-[#3a4b60] hover:text-[#d2deea]"
+        className="grid h-8 w-8 place-items-center rounded-sm border border-[#202c3b] bg-[#0d141d] font-mono text-[15px] leading-none text-[#8b9fb3] transition-colors hover:border-[#3a4b60] hover:text-[#d2deea]"
       >
         {side === "left" ? "»" : "«"}
       </button>
-      <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-[#536378] [writing-mode:vertical-rl] max-lg:[writing-mode:horizontal-tb]">
+      <span className="font-mono text-[12px] uppercase tracking-[0.16em] text-[#6a7f95] [writing-mode:vertical-rl] max-lg:[writing-mode:horizontal-tb]">
         {label}
       </span>
     </div>

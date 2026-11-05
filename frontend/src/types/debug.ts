@@ -167,6 +167,8 @@ export interface VariableNode {
   type: string;
   value: string | null;
   address: string | null;
+  /** V1.2 additive field: DWARF ``sizeof`` in bytes (null when unmeasured). */
+  size_bytes?: number | null;
   location_kind: VariableLocationKind;
   source: string;
   confidence: string;
