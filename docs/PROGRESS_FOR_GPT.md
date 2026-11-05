@@ -5,7 +5,7 @@
 > 目的：基于 `PWNviz_Vibe_Coding_Prompts (1).md` 与 `PWNviz_开发文档.md`，对照当前仓库，判断已经完成什么、还缺什么、下一步优先做什么。  
 > 核心原则：**真实 GDB 单步后，前端展示真实栈内存变化，优先级永远最高。**
 >
-> 仓库：<https://github.com/casset0804/PWNviz>（当前为 private；如 GPT 无法读取私有仓库，可直接上传本文件或把仓库改为 public）。
+> 仓库：<https://github.com/casset0804/PWNviz>（当前为 public，可直接由 GPT/浏览器读取）。
 
 ---
 
