@@ -9,6 +9,9 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
 > **真实性原则**：UI 占位可以存在，但任何寄存器值、地址、字节、指令都必须来自
 > 真实 GDB 会话。Phase 0 的调试面板明确标注 “no live session”，不展示任何伪造数据。
 
+> 面向 GPT/后续维护者的完整阶段进度与下一步决策材料：
+> [docs/PROGRESS_FOR_GPT.md](docs/PROGRESS_FOR_GPT.md)
+
 ---
 
 ## 当前状态：Phase 3 实时工作台 + Phase 4 变量语义（部分）
