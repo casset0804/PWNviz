@@ -22,6 +22,7 @@ export function Workbench() {
   const dismissError = useDebugStore((state) => state.dismissError);
   const attachSession = useDebugStore((state) => state.attachSession);
   const mode = useDebugStore((state) => state.workbenchMode);
+  const projection = useDebugStore((state) => state.projectionMode);
   const attachAttempted = useRef(false);
 
   useEffect(() => {
@@ -52,7 +53,9 @@ export function Workbench() {
     >
       <HeaderBar samples={samples} connection={connection} ready={ready} />
       <ExecutionBar ready={ready} />
-      <StatusBar />
+      {/* Projection mode hides the developer status strip (perf, session ids,
+          stream state); the teaching surfaces stay. */}
+      {mode === "presentation" && projection ? null : <StatusBar />}
       {mode === "presentation" ? <CurrentInstruction /> : null}
 
       {error ? (

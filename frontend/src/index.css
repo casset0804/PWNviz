@@ -109,37 +109,24 @@ samp,
    V1.2 presentation surfaces
    -------------------------------------------------------------------------- */
 
+/* V1.3.1: flat fills only. Repeating diagonal/linear grid textures made the
+   map look noisy and competed with the real byte content; the band kinds are
+   now distinguished by solid, low-contrast colour alone. */
 .stack-map-unknown {
-  background-color: rgba(9, 15, 23, 0.72);
-  background-image: repeating-linear-gradient(
-    135deg,
-    rgba(90, 112, 136, 0.10) 0,
-    rgba(90, 112, 136, 0.10) 1px,
-    transparent 1px,
-    transparent 9px
-  );
+  background-color: #0d141d;
 }
 
 .stack-map-unreadable {
-  background-color: rgba(30, 12, 18, 0.72);
-  background-image: repeating-linear-gradient(
-    135deg,
-    rgba(251, 113, 133, 0.16) 0,
-    rgba(251, 113, 133, 0.16) 2px,
-    transparent 2px,
-    transparent 7px
-  );
+  background-color: #2a1016;
+  border-left: 3px solid rgba(251, 113, 133, 0.75);
 }
 
 .stack-map-quiet {
-  background-color: rgba(6, 11, 17, 0.86);
-  background-image: repeating-linear-gradient(
-    0deg,
-    rgba(70, 90, 112, 0.10) 0,
-    rgba(70, 90, 112, 0.10) 1px,
-    transparent 1px,
-    transparent 14px
-  );
+  background-color: #080d13;
+}
+
+.stack-map-above {
+  background-color: #0b1119;
 }
 
 @keyframes pwnviz-memory-flash {

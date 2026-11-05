@@ -17,6 +17,79 @@ PWNviz 已经是一个能真实启动 Linux ELF、通过持久 GDB/MI3 单步、
 
 ---
 
+## 1.3 V1.3 增量：StackMap 视觉打磨与归属可靠性（2026-11-06）
+
+V1.3 不改调试链路、不加 mock；它解决 V1.2 遗留的三个教学可读性问题
+（缩放、小字节块裁切、变量归属证据），并为 UI 建立 Playwright 视觉回归基线。
+
+- **缩放系统**：`buildStackMap(snapshot, pxPerByte)` 参数化；
+  `实际比例`（10px/byte 固定）/ `适配当前帧` / `适配整栈` 三模式 +
+  百分比（相对实际比例）+ 重置，选择持久化。标尺/块/箭头/RSP-RBP Marker
+  共用 `addressTop()` 单一坐标函数（`model.pxPerByte`），任何缩放下
+  地址映射零偏移；缩放范围钳制 [1, 120] px/byte；
+- **小变量块**：块高永远严格等于真实地址空间；`<26px` 微型块内部不放文字，
+  变量名以引线芯片画在帧标签列（纯函数 `layoutGutterAnnotations` 防重叠）；
+  悬停弹出完整信息卡（`BlockHoverCard`）；点击打开底部 Inspector；
+  `VariableBlock` 布局阈值按实测高度分级（<52px 单行、≥64px 才画指针徽章行），
+  char/short/int/long/指针无裁切（DOM 断言 scrollHeight/Width）；
+- **变量归属三态**：`annotateVariableFrames()` 用 GDB `frame_level` 与真实
+  地址范围交叉验证 → `verified` / `conflict`（⚠，不强归）/ `unresolved`（?）；
+  叶函数红区（RSP 下方 ≤128 字节、帧基址之下、且不在其他帧内）判为一致，
+  避免 GCC12 -O0 叶函数（无 `sub rsp`）的局部变量被误报冲突；
+  窗口内但不在已证帧内的变量按真实地址独立绘制（此前被静默丢弃）；
+  模型新增 `variableAssignments[]` / `unframedBlocks` / `unverifiedCount`；
+- **栈帧标题板**：固定 88px 高度、位于帧标签列、不占地址轴；当前帧 cyan /
+  已验证调用者次级蓝 / 无法验证 amber warning（`data-state` 属性）；
+- **演示布局（1920×1080）**：三栏 `0.62fr / 3.1fr / 0.8fr`（栈图约 2/3）、
+  底部教学区 `clamp(150px,14vh,176px)`；演示面字号全面 ≥12px；
+- **课堂投屏模式**：`projectionMode` 入 store（`pwnviz.projection` 持久化），
+  HeaderBar 开关；隐藏 StatusBar/会话 ID/开发模式入口，教学区收成单行；
+- **视觉回归**：`@playwright/test` + `frontend/e2e/presentation.visual.spec.ts`，
+  7 个场景全部驱动真实 GDB 会话（launch 断在 main，MI 单步到检查点）：
+  main 调用 / push rbp 之后 / 局部变量初始化（要求 `sum==x+y`，防止把
+  未初始化垃圾字节当“已初始化”）/ 返回之前 / 无 DWARF / 无帧指针 / 投屏；
+  断言 DOM 与快照一致（Marker 地址、箭头坐标空间、块无裁切、帧无重叠、
+  无横向溢出、字体 ≥11px）；截图存 `docs/assets/presentation/`；
+  运行：`scripts/run_visual_tests.sh`（自动起 WSL 后端 + Vite）；
+- **新样例**：`samples/stack-nodwarf`（`-g0`）、`samples/stack-nofp`
+  （`-fomit-frame-pointer`），`scripts/build_samples.sh` 支持按样例覆盖编译参数；
+- **验证**：frontend 66 unit passed / 7 files；typecheck（app+e2e 双 tsconfig）
+  通过；build 通过；Playwright 7/7 passed（21.6s）。
+
+仍未解决：断点增删 UI、快照时间轴、调用者帧 DWARF 变量树、隔离/多用户。
+
+---
+
+## 1.3.1 V1.3.1 增量：StackMap 视觉清晰度与指针路由修复（2026-11-06）
+
+V1.3.1 只修复图形化栈视图的混乱、细线过多和指针箭头重叠问题；
+不改调试链路、不改内存数据模型、不加 mock。
+
+- **指针路由**：修复 V1.3 的通道重叠 bug（laneIndex 在过滤前分配 +
+  `Math.max` 控制点钳制使 laneIndex≥4 塌缩）。现在：过滤 NULL/窗外/不可读
+  之后按 Y 序分配连续正交通道；宽度随可见数动态计算（18px/通道、上限 12）；
+  正交折线 + 圆角；同块出口/同目标入口 6px 错开（钳制在块真实范围）；
+  marker id 由 link.id 派生；hover 突出当前线、其余淡化。
+  Presentation 默认只画选中块相关指针，"全部指针" 开关持久化显示全部；
+- **自适应标尺**：presentation 主刻度 ≥56px 间距、无次刻度；
+  developer 更密；随缩放调整；地址对齐不变；
+- **纯色色带**：删除三个 repeating-linear-gradient，unknown/unreadable/
+  below-rsp/above-frames 改纯色（unreadable 保留左侧红标）；
+- **RSP/RBP**：presentation = 芯片 + 短箭头 stub，点击临时全辅助线（5s），
+  developer 保留全横线；叶函数 RSP==RBP 时芯片自动错开（测试发现的真 bug）；
+- **逐字节变化标记**：按 diff.changed_bytes 真实地址定位，不再整块绿色覆盖；
+  变量显示 changed count；Inspector 列出选中块 before/after；
+- **边框清理**：删除 overlaps/归属 outline 与 unknown/band 虚线框；
+- **新样例**：`stack-deep`（多级调用）、`stack-pointers`（10 指针：3 同目标 +
+  NULL + 2 窗外）、`stack-manyvars`（12 混合局部）；
+- **验证**：frontend 72 unit passed；typecheck/build 通过；
+  Playwright 双套件 14/14（教学 7 + 清晰度 7），截图
+  `docs/assets/presentation/` 与 `docs/assets/stackmap-v1.3.1/`；
+- 仍未解决：极端嵌套跨度（>12 条）可能出现线条交叉（不重叠）；
+  no-DWARF 下 GDB 序言分析仍报告参数变量（真实数据，块数与快照一致）。
+
+---
+
 ## 1.2 V1.2 增量：图形化栈帧工作台（2026-11-05）
 
 V1.2 没有更换调试链路，也没有加入任何 mock 数据；它重做了前端信息架构，并把

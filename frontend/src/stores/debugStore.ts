@@ -63,6 +63,10 @@ interface DebugStore {
   scrollTarget: ScrollTarget | null;
   animationsEnabled: boolean;
   workbenchMode: WorkbenchMode;
+  /** Classroom projection: hides dev info, logs and secondary panels. */
+  projectionMode: boolean;
+  /** Draw every real pointer relation instead of only the selected one. */
+  showAllPointers: boolean;
   streamStatus: StreamStatus;
   busy: boolean;
   error: string | null;
@@ -75,6 +79,8 @@ interface DebugStore {
   setSelectedSampleId: (sampleId: string | null) => void;
   setBottomTab: (tab: BottomTab) => void;
   setWorkbenchMode: (mode: WorkbenchMode) => void;
+  setProjectionMode: (on: boolean) => void;
+  setShowAllPointers: (on: boolean) => void;
   toggleLeftPanel: () => void;
   toggleRightPanel: () => void;
   toggleBottomDock: () => void;
@@ -200,6 +206,22 @@ function readWorkbenchMode(): WorkbenchMode {
   }
 }
 
+function readProjectionMode(): boolean {
+  try {
+    return window.localStorage.getItem("pwnviz.projection") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function readShowAllPointers(): boolean {
+  try {
+    return window.localStorage.getItem("pwnviz.showAllPointers") === "1";
+  } catch {
+    return false;
+  }
+}
+
 function stripAnsi(value: string): string {
   return value.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
 }
@@ -254,6 +276,8 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
   scrollTarget: null,
   animationsEnabled: readAnimationPreference(),
   workbenchMode: readWorkbenchMode(),
+  projectionMode: readProjectionMode(),
+  showAllPointers: readShowAllPointers(),
   streamStatus: "closed",
   busy: false,
   error: null,
@@ -275,6 +299,22 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
       window.localStorage.setItem("pwnviz.mode", workbenchMode);
     } catch {
       // The mode switch still works for this page if storage is unavailable.
+    }
+  },
+  setProjectionMode: (projectionMode) => {
+    set({ projectionMode });
+    try {
+      window.localStorage.setItem("pwnviz.projection", projectionMode ? "1" : "0");
+    } catch {
+      // The toggle still works for this page if storage is unavailable.
+    }
+  },
+  setShowAllPointers: (showAllPointers) => {
+    set({ showAllPointers });
+    try {
+      window.localStorage.setItem("pwnviz.showAllPointers", showAllPointers ? "1" : "0");
+    } catch {
+      // The toggle still works for this page if storage is unavailable.
     }
   },
   toggleLeftPanel: () =>

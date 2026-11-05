@@ -14,7 +14,71 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
 
 ---
 
-## 当前状态：Phase 3 实时工作台 + Phase 4 变量语义 + V1.1 性能与中英双语 + V1.2 图形化栈帧
+## 当前状态：Phase 3 实时工作台 + Phase 4 变量语义 + V1.1 性能与中英双语 + V1.2 图形化栈帧 + V1.3 视觉打磨 + V1.3.1 清晰度修复
+
+### V1.3.1 亮点：StackMap 清晰度与指针路由修复（2026-11-06）
+
+- **指针正交路由**：修复通道重叠 bug——先过滤 NULL/窗外/不可读链接，
+  再按 Y 序分配连续正交通道（宽度随可见数动态计算，每条箭头独占 X，
+  不共用控制点）；同块出口/同目标入口错开；hover 突出当前线、其余淡化；
+- **选择聚焦**：Presentation 默认只绘制与选中内存块相关的指针关系，
+  HeaderBar "全部指针" 开关显示全部真实关系（持久化）；
+- **自适应标尺**：presentation 主刻度 ≥56px 间距且无次刻度（developer 更密），
+  随缩放调整，地址对齐不变——不再有每 8 字节一条的细线墙；
+- **纯色色带**：删除全部 repeating-linear-gradient 背景纹理；
+- **RSP/RBP**：默认芯片 + 短箭头（点击临时显示全辅助线 5 秒），developer
+  保留全横线；叶函数 RSP==RBP 时芯片自动错开；
+- **逐字节变化标记**：按真实 diff 地址定位，不再整块绿色覆盖；变量显示
+  changed count，Inspector 列出选中块 before/after；
+- 新样例：`stack-deep`（多级调用）、`stack-pointers`（10 指针覆盖全部
+  路由场景）、`stack-manyvars`（12 个混合局部变量）；
+- Playwright 双套件 **14/14**（教学 7 + 清晰度 7，真实 GDB，禁 mock），
+  截图 `docs/assets/stackmap-v1.3.1/`。
+
+### V1.3 亮点：StackMap 视觉打磨与归属可靠性（2026-11-06）
+
+- **缩放系统（不改变任何真实地址/字节大小）**：
+  - `实际比例`：固定教学比例 10px/真实字节（100%）；
+  - `适配当前帧`：以当前帧真实字节范围为基准计算缩放，使当前帧充满可视区；
+  - `适配整栈`：按可视区域计算缩放，整个栈窗口一屏显示；
+  - 标尺、内存块、PointerArrow、RSP/RBP Marker 全部共用同一个
+    `model.pxPerByte`（`addressTop()` 唯一坐标函数），缩放不产生地址映射偏移；
+  - 头部显示缩放百分比（相对 10px/byte）并提供一键重置；
+  - 选择持久化在 `localStorage["pwnviz.stackZoom"]`。
+- **小变量块不再裁切**：
+  - 内存块高度永远严格等于真实地址空间；小于 26px 的“微型块”内部不放文字，
+    变量名以**外部标注芯片**显示在帧标签列（带引线指向真实字节位置）；
+  - 悬停任何块都会弹出完整信息卡（名称/类型/真实值/地址范围/字节大小/归属证据）；
+  - 点击块即打开底部 Inspector（内存块详情）；
+  - char / short / int / long / 指针全尺寸验证（Playwright 断言块内无裁切）。
+- **变量归属三态验证（frame_level × 地址证据）**：
+  - `verified`：GDB `frame_level` 与真实地址范围一致（含叶函数红区：
+    局部变量在 RSP 之下 128 字节以内、且在帧基址之下时仍视为一致）；
+  - `conflict`：声明的帧可见但地址证据矛盾（在其它帧范围内/超出合理区域）——
+    变量按真实地址绘制并显示 ⚠，绝不强行归属；
+  - `unresolved`：证据不足（声明的帧不在窗口内等），显示 ? 徽章；
+  - 永远不根据变量名称猜测归属；窗口内但不在已证帧内的变量不再被静默丢弃，
+    而是按真实地址独立绘制并标注。
+- **栈帧标题板**：帧名使用固定高度（88px）独立标题板，位于帧标签列、
+  不占用真实内存地址空间；小栈帧也能完整展示（当前帧=cyan 高亮、
+  已验证调用者=次级蓝、无法验证=amber warning），不伪造帧边界。
+- **演示布局优化（1920×1080）**：栈图约占 2/3 宽度、源码面板收窄、
+  底部教学区压至 14vh；演示面全部字体 ≥12px（无 8–10px 大面积小字号）。
+- **课堂投屏模式**：HeaderBar 一键开关（持久化 `localStorage["pwnviz.projection"]`），
+  隐藏状态栏开发信息、会话 ID、次要面板；底部教学区收成单行标题条；
+  核心寄存器仍只显示 RIP/RSP/RBP/RAX（其余折叠）。
+- **视觉回归测试（Playwright + 真实 GDB，禁止 mock）**：
+  `frontend/e2e/presentation.visual.spec.ts` 驱动真实后端逐步到 7 个检查点
+  （main 调用 / push rbp 之后 / 局部变量初始化 / 返回之前 / 无 DWARF /
+  无帧指针 / 投屏模式），1920×1080 zh-CN 截图到 `docs/assets/presentation/`；
+  断言：标题无裁切、块内无裁切、RSP/RBP Marker 地址与快照一致、
+  PointerArrow 与块同一坐标空间、栈帧无重叠、页面无横向溢出、字体 ≥11px。
+  新增样例：`samples/stack-nodwarf`（-g0）、`samples/stack-nofp`
+  （-fomit-frame-pointer）。运行：`scripts/run_visual_tests.sh`。
+
+![V1.3 演示模式：局部变量初始化完成（真实 GDB）](docs/assets/presentation/03-locals-initialised.png)
+
+![V1.3 课堂投屏模式](docs/assets/presentation/07-projection-mode.png)
 
 ### V1.2 亮点：从缩小的 IDE 到图形化内存教学工作台（2026-11-05）
 

@@ -49,6 +49,7 @@ export const CoreRegisters = memo(function CoreRegisters() {
   const requestScroll = useDebugStore((state) => state.requestScroll);
   const selectInstruction = useDebugStore((state) => state.selectInstruction);
   const setWorkbenchMode = useDebugStore((state) => state.setWorkbenchMode);
+  const projection = useDebugStore((state) => state.projectionMode);
   const changed = new Set(snapshot?.diff.changed_registers ?? []);
 
   return (
@@ -62,7 +63,7 @@ export const CoreRegisters = memo(function CoreRegisters() {
           <h2 className="text-[19px] font-semibold text-[#edf5fd]">
             {t("panels:registers.coreTitle")}
           </h2>
-          <span className="font-mono text-[11.5px] uppercase tracking-[0.08em] text-[#5f7388]">
+          <span className="font-mono text-[12.5px] uppercase tracking-[0.08em] text-[#5f7388]">
             {t("panels:registers.liveValues")}
           </span>
         </div>
@@ -105,7 +106,7 @@ export const CoreRegisters = memo(function CoreRegisters() {
                     {entry.register}
                   </span>
                   {isChanged ? (
-                    <span className="mt-0.5 inline-flex items-center gap-1 text-[10.5px] uppercase tracking-[0.06em] text-emerald-300">
+                    <span className="mt-0.5 inline-flex items-center gap-1 text-[11.5px] uppercase tracking-[0.06em] text-emerald-300">
                       <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                       {t("panels:registers.changed")}
                     </span>
@@ -129,7 +130,7 @@ export const CoreRegisters = memo(function CoreRegisters() {
                   </span>
                 </span>
                 {entry.role === "stack" || entry.role === "base" ? (
-                  <span className="shrink-0 rounded-sm border border-[#33475c] bg-[#0c1520] px-1.5 py-1 text-[10.5px] font-medium text-[#9db1c5]">
+                  <span className="shrink-0 rounded-sm border border-[#33475c] bg-[#0c1520] px-1.5 py-1 text-[11.5px] font-medium text-[#9db1c5]">
                     {t("panels:registers.focus")}
                   </span>
                 ) : null}
@@ -141,10 +142,10 @@ export const CoreRegisters = memo(function CoreRegisters() {
         <details className="group mt-3 rounded-md border border-[#223242] bg-[#0a121b]">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-[13px] font-medium text-[#9fb2c6] marker:hidden">
             <span>{t("panels:registers.others")}</span>
-            <span className="font-mono text-[11px] text-[#5f7388] group-open:hidden">
+            <span className="font-mono text-[12px] text-[#5f7388] group-open:hidden">
               {t("panels:registers.showOthers")}
             </span>
-            <span className="hidden font-mono text-[11px] text-[#5f7388] group-open:inline">
+            <span className="hidden font-mono text-[12px] text-[#5f7388] group-open:inline">
               {t("panels:registers.hideOthers")}
             </span>
           </summary>
@@ -175,20 +176,22 @@ export const CoreRegisters = memo(function CoreRegisters() {
         </details>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="text-[11.5px] leading-4 text-[#5f7388]">
+          <span className="text-[12.5px] leading-4 text-[#5f7388]">
             {t("panels:registers.footer")}
           </span>
-          <button
-            type="button"
-            onClick={() => setWorkbenchMode("developer")}
-            className="ml-auto rounded-sm border border-[#2b3d51] bg-[#0c1520] px-2 py-1 text-[11.5px] text-[#8fa3b8] transition-colors hover:border-[#47627e] hover:text-[#d6e4f1]"
-            title={session ? t("panels:workbench.modeDeveloperTitle") : undefined}
-          >
-            {t("panels:workbench.modeDeveloper")}
-          </button>
+          {!projection ? (
+            <button
+              type="button"
+              onClick={() => setWorkbenchMode("developer")}
+              className="ml-auto rounded-sm border border-[#2b3d51] bg-[#0c1520] px-2 py-1 text-[12.5px] text-[#8fa3b8] transition-colors hover:border-[#47627e] hover:text-[#d6e4f1]"
+              title={session ? t("panels:workbench.modeDeveloperTitle") : undefined}
+            >
+              {t("panels:workbench.modeDeveloper")}
+            </button>
+          ) : null}
         </div>
         {!snapshot && !session ? (
-          <p className="mt-2 text-[11.5px] leading-4 text-[#5f7388]">
+          <p className="mt-2 text-[12.5px] leading-4 text-[#5f7388]">
             {t("panels:stackMap.noSnapshotHint")}
           </p>
         ) : null}

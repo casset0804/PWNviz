@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 
-import type { PointerLink, StackMapBlock } from "../../lib/stackMap";
+import { STACK_MAP_MICRO_BLOCK_PX, type PointerLink, type StackMapBlock } from "../../lib/stackMap";
 import { MemoryChangeOverlay } from "./MemoryChangeOverlay";
 import { VariableBlock } from "./VariableBlock";
 
@@ -12,6 +12,8 @@ interface MemoryBlockProps {
   highlighted: boolean;
   pointerTarget?: boolean;
   rightInset?: number;
+  /** Current map scale; change marks are positioned at exact byte rows. */
+  pxPerByte: number;
   snapshotId: number;
   animationsEnabled: boolean;
   reducedMotion: boolean;
@@ -41,24 +43,27 @@ function variableTone(block: StackMapBlock): string {
 
 function blockClasses(block: StackMapBlock): string {
   if (block.kind === "variable") {
-    return `${variableTone(block)} ${block.pin ? "border border-dashed border-[#3a4b5e]" : ""}`;
+    // One left accent = the single main separator. Ownership state is carried
+    // by the badge/tooltip, not by extra outlines around the block.
+    return `${variableTone(block)} ${block.pin ? "border-b border-dashed border-b-[#3a4b5e]" : ""}`;
   }
   if (block.kind === "saved-rbp") {
-    return "border-l-sky-400 bg-[#0c1c2c]/95";
+    return "border-l-sky-400 bg-[#0c1c2c]";
   }
   if (block.kind === "return-address") {
-    return "border-l-rose-400 bg-[#1c1119]/95";
+    return "border-l-rose-400 bg-[#1c1119]";
   }
+  // Flat band fills (no dashed/dotted boxes, no repeating textures).
   if (block.kind === "unreadable") {
-    return "border border-dashed border-rose-400/40 stack-map-unreadable";
+    return "border-l-0 stack-map-unreadable";
   }
   if (block.kind === "unknown") {
-    return "border border-dashed border-[#2c3d51] stack-map-unknown";
+    return "border-l-0 stack-map-unknown";
   }
   if (block.kind === "below-rsp") {
-    return "border border-dotted border-[#2a3a4c] stack-map-quiet";
+    return "border-l-0 stack-map-quiet";
   }
-  return "border border-dotted border-[#2a3a4c] stack-map-quiet";
+  return "border-l-0 stack-map-above";
 }
 
 export function MemoryBlock({
@@ -69,6 +74,7 @@ export function MemoryBlock({
   highlighted,
   pointerTarget = false,
   rightInset = 76,
+  pxPerByte,
   snapshotId,
   animationsEnabled,
   reducedMotion,
@@ -79,7 +85,12 @@ export function MemoryBlock({
 }: MemoryBlockProps) {
   const { t } = useTranslation(["panels", "common"]);
   const height = Math.max(1, block.height);
-  const veryCompact = height < 12;
+  /**
+   * Micro blocks (1–2 real bytes at actual scale; anything smaller at fit
+   * zoom) carry no internal text at all — text can never fit without lying
+   * about the byte extent. Names live in the frame gutter, details on hover.
+   */
+  const micro = height < STACK_MAP_MICRO_BLOCK_PX;
   const compact = height < 44;
   const changed = block.changedBytes.length > 0;
 
@@ -108,6 +119,8 @@ export function MemoryBlock({
       data-selected={selected ? "true" : "false"}
       data-unreadable={block.readable ? "false" : "true"}
       data-overlap={block.overlaps ? "true" : "false"}
+      data-micro={micro ? "true" : "false"}
+      data-assignment={block.assignment ?? ""}
       aria-label={`${block.label || labelForUnknown()} ${block.start} ${sizeText}`}
       title={`${block.label || labelForUnknown()} · ${block.start} · ${sizeText}`}
       onClick={() => onSelect(block)}
@@ -130,22 +143,31 @@ export function MemoryBlock({
             ? "z-20 ring-2 ring-sky-300/80"
             : pointerTarget
               ? "z-10 ring-1 ring-inset ring-sky-400/45"
-              : block.overlaps
-                ? "z-10 outline outline-1 -outline-offset-1 outline-amber-400/45"
-                : "z-10"
+              : "z-10"
       }`}
       style={{ top: block.top, height, right: rightInset }}
     >
       {changed ? (
         <MemoryChangeOverlay
           key={`${snapshotId}:${block.id}`}
-          changedCount={block.changedBytes.length}
+          changes={block.changedBytes}
+          blockEnd={block.end}
+          pxPerByte={pxPerByte}
           animationsEnabled={animationsEnabled}
           reducedMotion={reducedMotion}
         />
       ) : null}
 
-      {block.kind === "variable" ? (
+      {micro ? (
+        // Micro block: a compact marker keeps the block identifiable without
+        // ever letting text overflow the real byte extent.
+        <span
+          aria-hidden="true"
+          className="absolute right-2 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-[1px] bg-[#9fc3e8]/70"
+        />
+      ) : null}
+
+      {!micro && block.kind === "variable" ? (
         <VariableBlock
           block={block}
           link={pointerLink}
@@ -156,7 +178,7 @@ export function MemoryBlock({
         />
       ) : null}
 
-      {block.kind === "saved-rbp" || block.kind === "return-address" ? (
+      {!micro && (block.kind === "saved-rbp" || block.kind === "return-address") ? (
         <span className={`flex min-w-0 flex-col justify-center ${compact ? "gap-0" : "gap-1"}`}>
           <span className="flex min-w-0 items-baseline gap-2">
             <span
@@ -172,13 +194,13 @@ export function MemoryBlock({
               {block.value ?? t("common:unreadable")}
             </span>
             {!block.readable ? (
-              <span className="shrink-0 text-[11.5px] text-rose-300">
+              <span className="shrink-0 text-[12.5px] text-rose-300">
                 {t("panels:stackMap.unreadable")}
               </span>
             ) : null}
           </span>
           {!compact ? (
-            <span className="flex items-center gap-3 font-mono text-[11.5px] text-[#8fa2b6]">
+            <span className="flex items-center gap-3 font-mono text-[12.5px] text-[#8fa2b6]">
               <span>{block.start}</span>
               <span>{sizeText}</span>
             </span>
@@ -186,7 +208,8 @@ export function MemoryBlock({
         </span>
       ) : null}
 
-      {block.kind !== "variable" &&
+      {!micro &&
+      block.kind !== "variable" &&
       block.kind !== "saved-rbp" &&
       block.kind !== "return-address" ? (
         <span className="flex h-full min-w-0 items-start justify-between gap-3 py-2">
@@ -200,8 +223,8 @@ export function MemoryBlock({
                 {labelForUnknown()}
               </span>
             ) : null}
-            {!veryCompact && height >= 28 ? (
-              <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[11.5px] text-[#5f7288]">
+            {!compact && height >= 28 ? (
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[12.5px] text-[#5f7288]">
                 <span>{block.start}</span>
                 <span>{sizeText}</span>
                 {block.kind === "unknown" ? (
@@ -210,7 +233,7 @@ export function MemoryBlock({
               </span>
             ) : null}
           </span>
-          <span className="shrink-0 rounded-sm border border-[#2b3c50] bg-[#0a1119]/70 px-1.5 py-0.5 font-mono text-[11px] text-[#6f8298]">
+          <span className="shrink-0 rounded-sm border border-[#2b3c50] bg-[#0a1119]/70 px-1.5 py-0.5 font-mono text-[12px] text-[#6f8298]">
             {block.sizeBytes === null ? "?" : `${block.sizeBytes} B`}
           </span>
         </span>

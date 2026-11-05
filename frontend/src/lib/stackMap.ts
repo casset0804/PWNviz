@@ -10,6 +10,12 @@
  *    frame is only drawn as a verified frame when the return-address slot in
  *    memory really contains that PC. We never assume `rbp - rsp` is the locals
  *    area and we never invent a variable address;
+ *  - variable ownership is double-checked: the GDB/DWARF `frame_level` claim
+ *    must agree with the frame whose real byte range contains the variable's
+ *    address. When the two disagree the variable is never force-attached to a
+ *    frame; it is drawn at its true address and marked `conflict`. When the
+ *    evidence is insufficient the variable is marked `unresolved`. Ownership
+ *    is never guessed from a variable name;
  *  - when the frame pointer is unavailable/optimised away the current function
  *    is still drawn from RSP upward, but marked "boundary unknown";
  *  - changed bytes come from `snapshot.diff.changed_bytes`.
@@ -31,18 +37,211 @@ import type {
   VariableNode,
 } from "../types/debug";
 
-/** Vertical pixels per real stack byte. Kept in one place so offsets stay exact. */
+/** Vertical pixels per real stack byte at "actual scale" (100 %). */
 export const STACK_MAP_PX_PER_BYTE = 10;
-/** Width reserved on the right of the map for pointer-arrow routing. */
-export const STACK_MAP_POINTER_LANE = 76;
+/**
+ * Zoom bounds. The lower bound keeps blocks, labels and arrows readable when a
+ * deep stack is fitted; the upper bound keeps the drawing honest.
+ */
+export const STACK_MAP_MIN_PX_PER_BYTE = 1;
+export const STACK_MAP_MAX_PX_PER_BYTE = 120;
+/** Breathing room kept inside the viewport for the fit modes (pixels). */
+export const STACK_MAP_FIT_PADDING = 24;
+/**
+ * Blocks shorter than this never carry internal text: 1-byte (10 px) and
+ * 2-byte (20 px) blocks cannot hold a readable line. Their names are drawn
+ * outside the byte area (frame-label gutter) and the full details are on
+ * hover; the block itself keeps its exact real byte geometry.
+ */
+export const STACK_MAP_MICRO_BLOCK_PX = 26;
+/**
+ * Horizontal pixels per pointer-routing lane. The routing area grows with the
+ * number of *visible* links (see pointerLaneWidth), so every arrow keeps its
+ * own orthogonal channel instead of sharing one control point.
+ */
+export const STACK_MAP_POINTER_LANE = 18;
+/** Hard cap on simultaneously drawn routing lanes (keeps the map usable). */
+export const STACK_MAP_MAX_POINTER_LANES = 12;
 /** The address ruler's width. */
 export const STACK_MAP_RULER_WIDTH = 164;
 /** The frame-label column that sits between the ruler and the memory blocks. */
 export const STACK_MAP_FRAME_LABEL_WIDTH = 184;
 /** Safety cap: a snapshot never needs more than a handful of drawn frames. */
 export const MAX_RENDERED_FRAMES = 6;
-/** Ruler label interval (bytes); ticks are drawn every 8 bytes. */
-const RULER_LABEL_STEP = 16;
+
+/**
+ * Routing-area width for the given number of *visible* pointer links. Lanes
+ * are only reserved for links that will actually be drawn, and the width grows
+ * linearly so two arrows can never be squeezed onto one X coordinate.
+ */
+export function pointerLaneWidth(visibleLinkCount: number): number {
+  if (visibleLinkCount <= 0) return 12;
+  const lanes = Math.min(visibleLinkCount, STACK_MAP_MAX_POINTER_LANES);
+  return lanes * STACK_MAP_POINTER_LANE + 20;
+}
+
+/**
+ * Pointer-lane assignment happens AFTER invalid links are filtered out — the
+ * V1.3 bug was assigning laneIndex while building every link, so skipped
+ * states left holes and high indices collapsed onto one clamped control point.
+ *
+ * Links are sorted by their (unknown) geometry-independent key first and then
+ * numbered densely 0..n-1; the canvas sorts by rendered Y before calling this
+ * so lower arrows get inner lanes and runs stay deterministic.
+ */
+export function assignPointerLanes<T extends object>(
+  visible: T[],
+  orderKey: (link: T) => number,
+): Array<T & { laneIndex: number }> {
+  return [...visible]
+    .sort((left, right) => orderKey(left) - orderKey(right))
+    .map((link, index) => ({ ...link, laneIndex: index }));
+}
+
+/**
+ * Zoom modes. "actual" keeps the fixed teaching scale (10 px per real byte);
+ * the fit modes only *derive* a scale from the viewport — every block, tick,
+ * marker and arrow still uses that one shared px/byte, so the address mapping
+ * can never drift.
+ */
+export type StackMapZoomMode = "actual" | "fit-frame" | "fit-stack";
+
+/** Ruler density: presentation keeps few major ticks only, developer is denser. */
+export type StackMapRulerMode = "presentation" | "developer";
+
+interface RulerTick {
+  address: string;
+  top: number;
+  major: boolean;
+}
+
+/**
+ * Adaptive ruler ticks.
+ *
+ * - presentation: major ticks only, spaced at least ~56 px apart (32/64/128…
+ *   real bytes depending on zoom); no minor 1-px hairlines;
+ * - developer: major ticks every 8/16/32… bytes plus optional minor ticks when
+ *   they would not crowd (≥ 14 px apart);
+ * - tick Y positions use the same addressTop() transform as the blocks, so an
+ *   address label always sits exactly at its byte row at any zoom level.
+ */
+export function buildRulerTicks(
+  windowStart: bigint,
+  windowEnd: bigint,
+  pxPerByte: number,
+  mode: StackMapRulerMode,
+): RulerTick[] {
+  const span = windowEnd - windowStart;
+  if (span <= 0n || pxPerByte <= 0) return [];
+
+  const candidates = mode === "developer" ? [8, 16, 32, 64, 128, 256, 512] : [32, 64, 128, 256, 512, 1024];
+  const minMajorPx = mode === "developer" ? 40 : 56;
+  const majorStep = BigInt(candidates.find((step) => step * pxPerByte >= minMajorPx) ?? candidates[candidates.length - 1] * 2);
+
+  const minorStep =
+    mode === "developer" && Number(majorStep) / 2 >= 1 && (Number(majorStep) / 2) * pxPerByte >= 14
+      ? majorStep / 2n
+      : null;
+  const walkStep = minorStep ?? majorStep;
+
+  const ticks: RulerTick[] = [];
+  const firstTick = windowEnd - (windowEnd % walkStep === 0n ? walkStep : (windowEnd % walkStep));
+  for (let address = firstTick; address >= windowStart; address -= walkStep) {
+    const major = (windowEnd - address) % majorStep === 0n;
+    ticks.push({
+      address: formatAddress(address),
+      top: Number(windowEnd - address) * pxPerByte + pxPerByte,
+      major,
+    });
+    if (ticks.length > 4096) break;
+  }
+  return ticks;
+}
+
+export function clampPxPerByte(pxPerByte: number): number {
+  if (!Number.isFinite(pxPerByte) || pxPerByte <= 0) return STACK_MAP_PX_PER_BYTE;
+  return Math.min(
+    STACK_MAP_MAX_PX_PER_BYTE,
+    Math.max(STACK_MAP_MIN_PX_PER_BYTE, pxPerByte),
+  );
+}
+
+/** px/byte so the whole visible stack window fits the viewport height. */
+export function fitStackPxPerByte(viewportHeight: number, spanBytes: number): number {
+  if (viewportHeight <= STACK_MAP_FIT_PADDING || spanBytes <= 0) {
+    return STACK_MAP_PX_PER_BYTE;
+  }
+  return clampPxPerByte((viewportHeight - STACK_MAP_FIT_PADDING) / spanBytes);
+}
+
+/** px/byte so the current frame fills the viewport height. */
+export function fitFramePxPerByte(viewportHeight: number, frameBytes: number): number {
+  if (viewportHeight <= STACK_MAP_FIT_PADDING * 2 || frameBytes <= 0) {
+    return STACK_MAP_PX_PER_BYTE;
+  }
+  return clampPxPerByte((viewportHeight - STACK_MAP_FIT_PADDING * 2) / frameBytes);
+}
+
+/** Zoom percentage relative to actual scale (10 px/byte = 100 %). */
+export function zoomPercent(pxPerByte: number): number {
+  return Math.round((pxPerByte / STACK_MAP_PX_PER_BYTE) * 100);
+}
+
+export interface GutterAnnotation {
+  blockId: string;
+  label: string;
+  assignment: VariableAssignmentState | null;
+  /** Frame-relative Y of the annotation chip's top edge. */
+  chipTop: number;
+  /** Frame-relative Y the chip points at (the block's vertical centre). */
+  anchorTop: number;
+}
+
+/**
+ * Place external name chips for micro variable blocks in the frame-label
+ * gutter, next to (never inside) their byte block.
+ *
+ * Chips stack top-down and are pushed apart so two adjacent micro variables
+ * (e.g. `char` above `short`, 10 px apart) never overlap each other; the chip
+ * keeps a leader anchor pointing at the block's real centre. Chips never
+ * render inside the byte area, so block geometry is untouched.
+ */
+export function layoutGutterAnnotations(
+  blocks: Array<{
+    id: string;
+    kind: StackMapBlockKind;
+    label: string;
+    top: number;
+    height: number;
+    assignment: VariableAssignmentState | null;
+  }>,
+  options: { chipHeight?: number; gap?: number; minTop?: number } = {},
+): GutterAnnotation[] {
+  const chipHeight = options.chipHeight ?? 18;
+  const gap = options.gap ?? 3;
+  const minTop = Math.max(0, options.minTop ?? 0);
+  const candidates = blocks
+    .filter(
+      (block) =>
+        block.kind === "variable" && Boolean(block.label) && block.height < STACK_MAP_MICRO_BLOCK_PX,
+    )
+    .sort((left, right) => left.top - right.top);
+  const result: GutterAnnotation[] = [];
+  let cursor = minTop;
+  for (const block of candidates) {
+    const anchorTop = block.top + block.height / 2;
+    const chipTop = Math.max(anchorTop - chipHeight / 2, cursor);
+    result.push({
+      blockId: block.id,
+      label: block.label,
+      assignment: block.assignment,
+      chipTop,
+      anchorTop,
+    });
+    cursor = chipTop + chipHeight + gap;
+  }
+  return result;
+}
 
 export type StackMapBlockKind =
   | "variable"
@@ -54,6 +253,41 @@ export type StackMapBlockKind =
   | "above-frames";
 
 export type VariableSizeSource = "dwarf" | "abi" | "unknown";
+
+/**
+ * Evidence-backed variable ownership.
+ *
+ *  - `verified`   — the GDB `frame_level` claim and the frame whose real byte
+ *                   range contains the address agree;
+ *  - `conflict`   — the claimed frame is visible in the window but the address
+ *                   provably lives outside (or inside another) frame. The
+ *                   variable is drawn at its true address but never attached
+ *                   to a frame's variable list;
+ *  - `unresolved` — insufficient evidence (claimed level not drawn, or the
+ *                   address lies outside every drawn frame).
+ */
+export type VariableAssignmentState = "verified" | "conflict" | "unresolved";
+
+export type VariableAssignmentReason =
+  | "level-and-address-agree"
+  | "within-frame-region"
+  | "address-in-other-frame"
+  | "address-outside-claimed-frame"
+  | "claimed-frame-not-visible"
+  | "outside-verified-frames"
+  | "frame-level-missing";
+
+export interface VariableAssignment {
+  variableName: string;
+  /** Real start address of the variable. */
+  address: string;
+  /** `frame_level` as reported by GDB/DWARF (null when not reported). */
+  claimedFrameLevel: number | null;
+  /** Level of the drawn frame whose byte range contains the address. */
+  geometricFrameLevel: number | null;
+  state: VariableAssignmentState;
+  reason: VariableAssignmentReason;
+}
 
 export interface StackMapBlock {
   id: string;
@@ -79,6 +313,9 @@ export interface StackMapBlock {
   /** True for a variable whose DWARF size was not measurable. */
   pin: boolean;
   overlaps: boolean;
+  /** Ownership evidence for variable blocks; null for bookkeeping bands. */
+  assignment: VariableAssignmentState | null;
+  assignmentReason: VariableAssignmentReason | null;
 }
 
 export interface StackFrameExtent {
@@ -167,11 +404,17 @@ export interface StackMapModel {
   aboveFrames: StackMapBlock | null;
   unplacedVariables: VariableNode[];
   registerVariables: VariableNode[];
+  /** In-window memory variables with their ownership evidence, one per variable. */
+  variableAssignments: VariableAssignment[];
+  /** Verified + conflict + unresolved variable blocks, at their true addresses. */
+  unframedBlocks: StackMapBlock[];
+  /** conflict + unresolved count (ownership could not be proven). */
+  unverifiedCount: number;
   changedCount: number;
   unreadableCount: number;
   rulerTicks: Array<{ address: string; top: number; major: boolean }>;
   firstFrameLevel: number | null;
-}
+};
 
 const EMPTY_MODEL: StackMapModel = {
   available: false,
@@ -194,6 +437,9 @@ const EMPTY_MODEL: StackMapModel = {
   aboveFrames: null,
   unplacedVariables: [],
   registerVariables: [],
+  variableAssignments: [],
+  unframedBlocks: [],
+  unverifiedCount: 0,
   changedCount: 0,
   unreadableCount: 0,
   rulerTicks: [],
@@ -386,12 +632,12 @@ function clamp(value: bigint, low: bigint, high: bigint): bigint {
   return value;
 }
 
-function yFor(address: bigint, windowEnd: bigint): number {
-  return Number(windowEnd - address) * STACK_MAP_PX_PER_BYTE;
+function yFor(address: bigint, windowEnd: bigint, pxPerByte: number): number {
+  return Number(windowEnd - address) * pxPerByte;
 }
 
-function sizeFor(start: bigint, end: bigint): number {
-  return Number(end - start) * STACK_MAP_PX_PER_BYTE;
+function sizeFor(start: bigint, end: bigint, pxPerByte: number): number {
+  return Number(end - start) * pxPerByte;
 }
 
 // ---------------------------------------------------------------------------
@@ -564,7 +810,8 @@ function deriveEntryFrames(
   return frames;
 }
 
-interface VariablePlacement {
+/** Geometry-only placement, before ownership is cross-checked. */
+interface VariablePlacementBase {
   node: VariableNode;
   start: bigint;
   end: bigint;
@@ -573,13 +820,138 @@ interface VariablePlacement {
   clipped: boolean;
 }
 
+interface VariablePlacement extends VariablePlacementBase {
+  /** Level of the drawn frame containing the start address (null = none). */
+  geometricFrameLevel: number | null;
+  assignment: VariableAssignmentState;
+  assignmentReason: VariableAssignmentReason;
+}
+
+/**
+ * Double-check variable ownership against real memory.
+ *
+ * The GDB/DWARF `frame_level` is the primary claim; the frame whose drawn byte
+ * range contains the variable's start address is the geometric evidence.
+ *
+ *  - both present and equal            -> verified;
+ *  - claimed frame drawn, evidence says otherwise -> conflict (never attached
+ *    to a frame's variable list, drawn at the true address);
+ *  - claimed frame not drawn, or address outside every drawn frame -> unresolved.
+ *
+ * Ownership is never inferred from the variable name.
+ */
+function annotateVariableFrames(
+  placed: VariablePlacementBase[],
+  drawn: VerifiedFrame[],
+  windowStart: bigint,
+  rsp: bigint | null,
+): VariablePlacement[] {
+  return placed.map((placement) => {
+    const container = drawn.find(
+      (frame) => placement.start >= frame.start && placement.start < frame.end,
+    );
+    const geometricFrameLevel = container ? container.level : null;
+    const claimed =
+      typeof placement.node.frame_level === "number" &&
+      Number.isFinite(placement.node.frame_level)
+        ? placement.node.frame_level
+        : null;
+    const claimedFrame =
+      claimed === null ? null : drawn.find((frame) => frame.level === claimed) ?? null;
+
+    if (claimed === null) {
+      return {
+        ...placement,
+        geometricFrameLevel,
+        assignment: "unresolved" as const,
+        assignmentReason: "frame-level-missing" as const,
+      };
+    }
+    if (claimedFrame && container) {
+      if (claimedFrame.level === container.level) {
+        return {
+          ...placement,
+          geometricFrameLevel,
+          assignment: "verified" as const,
+          assignmentReason: "level-and-address-agree" as const,
+        };
+      }
+      return {
+        ...placement,
+        geometricFrameLevel,
+        assignment: "conflict" as const,
+        assignmentReason: "address-in-other-frame" as const,
+      };
+    }
+    if (claimedFrame && !container) {
+      // Leaf functions may keep locals below RSP in the x86-64 red zone, so an
+      // address outside the drawn extent is only a contradiction when it does
+      // not sit in the plausible local region: from the deepest boundary below
+      // the frame up to its base (plus the incoming-args area above it).
+      const below = drawn.find((frame) => frame.level === claimedFrame.level - 1);
+      // No frame below: locals may sit in the x86-64 red zone (128 bytes below
+      // RSP), never further — anything deeper cannot be a live local.
+      const redZoneFloor = rsp !== null ? rsp - 128n : windowStart;
+      const lowerBound = below
+        ? below.end
+        : redZoneFloor > windowStart
+          ? redZoneFloor
+          : windowStart;
+      const upperBound =
+        claimedFrame.base > 0n ? claimedFrame.base + 16n : claimedFrame.end;
+      const inPlausibleRegion =
+        placement.start >= lowerBound && placement.start <= upperBound;
+      if (inPlausibleRegion) {
+        return {
+          ...placement,
+          geometricFrameLevel: claimedFrame.level,
+          assignment: "verified" as const,
+          assignmentReason: "within-frame-region" as const,
+        };
+      }
+      // Positive contradiction: the claimed frame is visible, so its real
+      // extent is known, and the address provably lies outside its region.
+      return {
+        ...placement,
+        geometricFrameLevel,
+        assignment: "conflict" as const,
+        assignmentReason: "address-outside-claimed-frame" as const,
+      };
+    }
+    if (!claimedFrame && container) {
+      return {
+        ...placement,
+        geometricFrameLevel,
+        assignment: "unresolved" as const,
+        assignmentReason: "claimed-frame-not-visible" as const,
+      };
+    }
+    return {
+      ...placement,
+      geometricFrameLevel: null,
+      assignment: "unresolved" as const,
+      assignmentReason: "outside-verified-frames" as const,
+    };
+  });
+}
+
+function assignmentFor(placement: VariablePlacement): {
+  assignment: VariableAssignmentState;
+  assignmentReason: VariableAssignmentReason;
+} {
+  return {
+    assignment: placement.assignment,
+    assignmentReason: placement.assignmentReason,
+  };
+}
+
 function placeVariables(
   nodes: VariableNode[],
   windowStart: bigint,
   windowEnd: bigint,
   pointerBits: number,
-): { placed: VariablePlacement[]; unplaced: VariableNode[] } {
-  const placed: VariablePlacement[] = [];
+): { placed: VariablePlacementBase[]; unplaced: VariableNode[] } {
+  const placed: VariablePlacementBase[] = [];
   const unplaced: VariableNode[] = [];
   for (const node of nodes) {
     if (node.location_kind !== "memory" || !node.address) continue;
@@ -625,9 +997,10 @@ function blockFromPlacement(
   windowEnd: bigint,
   changedByAddress: Map<string, MemoryChange>,
   map: ByteMap,
+  pxPerByte: number,
 ): StackMapBlock {
   const node = placement.node;
-  const top = yFor(placement.end, windowEnd) - frameTopPx;
+  const top = yFor(placement.end, windowEnd, pxPerByte) - frameTopPx;
   const changedBytes: MemoryChange[] = [];
   for (const change of changedByAddress.values()) {
     const address = parseAddress(change.address);
@@ -636,9 +1009,10 @@ function blockFromPlacement(
     }
   }
   return {
-    id: `var:${node.name}:${frameTopPx}:${placement.start.toString(16)}`,
+    // Zoom-stable id: the geometric frame level, not a pixel offset.
+    id: `var:${placement.geometricFrameLevel ?? "u"}:${node.name}:${placement.start.toString(16)}`,
     kind: "variable",
-    frameLevel: node.frame_level ?? 0,
+    frameLevel: placement.geometricFrameLevel,
     start: formatAddress(placement.start),
     end: formatAddress(placement.end),
     sizeBytes: placement.size,
@@ -654,9 +1028,10 @@ function blockFromPlacement(
     readable: rangeReadable(map, placement.start, placement.end),
     clipped: placement.clipped,
     top,
-    height: Math.max(1, sizeFor(placement.start, placement.end)),
+    height: Math.max(1, sizeFor(placement.start, placement.end, pxPerByte)),
     pin: placement.size === null,
     overlaps: false,
+    ...assignmentFor(placement),
   };
 }
 
@@ -687,6 +1062,7 @@ function frameUnknownBlocks(
   knownRanges: Array<{ start: bigint; end: bigint }>,
   map: ByteMap,
   windowEnd: bigint,
+  pxPerByte: number,
 ): { blocks: StackMapBlock[]; unknownRanges: StackFrameExtent["unknownRanges"] } {
   const blocks: StackMapBlock[] = [];
   const unknownRanges: StackFrameExtent["unknownRanges"] = [];
@@ -711,10 +1087,12 @@ function frameUnknownBlocks(
       changedBytes: [],
       readable,
       clipped: false,
-      top: yFor(gap.end, windowEnd) - frameTopPx,
-      height: Math.max(1, sizeFor(gap.start, gap.end)),
+      top: yFor(gap.end, windowEnd, pxPerByte) - frameTopPx,
+      height: Math.max(1, sizeFor(gap.start, gap.end, pxPerByte)),
       pin: false,
       overlaps: false,
+      assignment: null,
+      assignmentReason: null,
     });
     unknownRanges.push({
       start: formatAddress(gap.start),
@@ -729,7 +1107,18 @@ function frameUnknownBlocks(
 // Public build entry
 // ---------------------------------------------------------------------------
 
-export function buildStackMap(snapshot: Snapshot | null): StackMapModel {
+export interface StackMapBuildOptions {
+  /** Ruler density; presentation is the default teaching surface. */
+  rulerMode?: StackMapRulerMode;
+}
+
+export function buildStackMap(
+  snapshot: Snapshot | null,
+  pxPerByte: number = STACK_MAP_PX_PER_BYTE,
+  options: StackMapBuildOptions = {},
+): StackMapModel {
+  const scale = clampPxPerByte(pxPerByte);
+  const rulerMode: StackMapRulerMode = options.rulerMode ?? "presentation";
   if (!snapshot) return EMPTY_MODEL;
   const windowStart = parseAddress(snapshot.stack.range_start);
   const windowEnd = parseAddress(snapshot.stack.range_end);
@@ -742,7 +1131,7 @@ export function buildStackMap(snapshot: Snapshot | null): StackMapModel {
     };
   }
   const span = windowEnd - windowStart;
-  const contentHeight = sizeFor(windowStart, windowEnd);
+  const contentHeight = sizeFor(windowStart, windowEnd, scale);
   if (span <= 0n) return EMPTY_MODEL;
 
   const map = buildByteMap(snapshot.stack.rows, windowStart, windowEnd);
@@ -764,7 +1153,7 @@ export function buildStackMap(snapshot: Snapshot | null): StackMapModel {
       address,
       before: change.before,
       after: change.after,
-      top: yFor(parsed, windowEnd),
+      top: yFor(parsed, windowEnd, scale),
     });
   }
   changeMarks.sort((left, right) => left.top - right.top);
@@ -790,55 +1179,53 @@ export function buildStackMap(snapshot: Snapshot | null): StackMapModel {
   const entryFrames = verified.length === 0
     ? deriveEntryFrames(gdbFrames, map, rsp, rbp, windowStart, windowEnd)
     : [];
-  const drawn: VerifiedFrame[] = verified.length > 0 ? verified : entryFrames;
-  const memoryVisibleLevels = new Set(drawn.map((frame) => frame.level));
-
-  const frames: StackFrameExtent[] = [];
-
+  let drawn: VerifiedFrame[] = verified.length > 0 ? verified : entryFrames;
   if (drawn.length === 0 && rsp !== null) {
     // No corroborated frame pointer and no provable return-address slot. Still
     // show the real current stack region from RSP upward, clearly marked as
     // having an unknown upper boundary.
-    const gdbFrame = gdbFrames[0] ?? null;
-    frames.push(
-      makeFrame(
-        {
-          level: 0,
-          base: 0n,
-          start: rsp,
-          end: windowEnd,
-          savedRbp: null,
-          savedRbpSlot: null,
-          returnAddress: null,
-          returnAddressSlot: null,
-          verified: false,
-        },
-        gdbFrame,
-        placed,
-        map,
-        changedByAddress,
-        windowEnd,
-        registerVariables,
-      ),
-    );
-  } else {
-    for (const frame of drawn) {
-      const gdbFrame = gdbFrames[frame.level] ?? null;
-      frames.push(
-        makeFrame(
-          frame,
-          gdbFrame,
-          placed,
-          map,
-          changedByAddress,
-          windowEnd,
-          frame.level === 0 ? registerVariables : [],
-        ),
-      );
-    }
+    drawn = [
+      {
+        level: 0,
+        base: 0n,
+        start: rsp,
+        end: windowEnd,
+        savedRbp: null,
+        savedRbpSlot: null,
+        returnAddress: null,
+        returnAddressSlot: null,
+        verified: false,
+      },
+    ];
   }
+  const memoryVisibleLevels = new Set(drawn.map((frame) => frame.level));
 
-  const allBlocks = frames.flatMap((frame) => frame.blocks);
+  // Ownership is decided only after the real frame extents are known, so the
+  // frame_level claim can be cross-checked against address evidence.
+  const annotated = annotateVariableFrames(placed, drawn, windowStart, rsp);
+
+  const frames: StackFrameExtent[] = drawn.map((frame) =>
+    makeFrame(
+      frame,
+      gdbFrames[frame.level] ?? null,
+      annotated,
+      map,
+      changedByAddress,
+      windowEnd,
+      frame.level === 0 ? registerVariables : [],
+      scale,
+    ),
+  );
+
+  // Variables whose address lies outside every drawn frame: drawn at their
+  // true address, ownership explicitly unverified. They were silently dropped
+  // before V1.3.
+  const unframedBlocks = annotated
+    .filter((placement) => placement.geometricFrameLevel === null)
+    .map((placement) => blockFromPlacement(placement, 0, windowEnd, changedByAddress, map, scale))
+    .sort((left, right) => left.top - right.top);
+
+  const allBlocks = [...frames.flatMap((frame) => frame.blocks), ...unframedBlocks];
 
   // Bytes below RSP are real stack bytes, but they are not part of any active
   // frame. Show them as their own neutral band instead of assigning ownership.
@@ -861,10 +1248,12 @@ export function buildStackMap(snapshot: Snapshot | null): StackMapModel {
       changedBytes: [],
       readable: rangeReadable(map, windowStart, end),
       clipped: false,
-      top: yFor(end, windowEnd),
-      height: Math.max(1, sizeFor(windowStart, end)),
+      top: yFor(end, windowEnd, scale),
+      height: Math.max(1, sizeFor(windowStart, end, scale)),
       pin: false,
       overlaps: false,
+      assignment: null,
+      assignmentReason: null,
     };
   }
 
@@ -897,26 +1286,34 @@ export function buildStackMap(snapshot: Snapshot | null): StackMapModel {
         readable: rangeReadable(map, topEnd, windowEnd),
         clipped: false,
         top: 0,
-        height: Math.max(1, sizeFor(topEnd, windowEnd)),
+        height: Math.max(1, sizeFor(topEnd, windowEnd, scale)),
         pin: false,
         overlaps: false,
+        assignment: null,
+        assignmentReason: null,
       };
     }
   }
 
   const pointerLinks = buildPointerLinks(placed, allBlocks, windowStart, windowEnd);
 
-  const rulerTicks: Array<{ address: string; top: number; major: boolean }> = [];
-  const firstTick = windowEnd - 8n;
-  for (let address = firstTick; address >= windowStart; address -= 8n) {
-    const major = (address - windowStart) % BigInt(RULER_LABEL_STEP) === 0n;
-    rulerTicks.push({
-      address: formatAddress(address),
-      top: yFor(address, windowEnd) + STACK_MAP_PX_PER_BYTE,
-      major,
-    });
-    if (rulerTicks.length > 4096) break;
-  }
+  const variableAssignments: VariableAssignment[] = annotated.map((placement) => ({
+    variableName: placement.node.name,
+    address: formatAddress(placement.start),
+    claimedFrameLevel:
+      typeof placement.node.frame_level === "number" &&
+      Number.isFinite(placement.node.frame_level)
+        ? placement.node.frame_level
+        : null,
+    geometricFrameLevel: placement.geometricFrameLevel,
+    state: placement.assignment,
+    reason: placement.assignmentReason,
+  }));
+  const unverifiedCount = variableAssignments.filter(
+    (entry) => entry.state !== "verified",
+  ).length;
+
+  const rulerTicks = buildRulerTicks(windowStart, windowEnd, scale, rulerMode);
 
   const callChain = buildCallChain(gdbFrames, memoryVisibleLevels);
 
@@ -926,12 +1323,12 @@ export function buildStackMap(snapshot: Snapshot | null): StackMapModel {
     windowStart: formatAddress(windowStart),
     windowEnd: formatAddress(windowEnd),
     contentHeight,
-    pxPerByte: STACK_MAP_PX_PER_BYTE,
+    pxPerByte: scale,
     rsp: rsp === null ? null : formatAddress(rsp),
     rbp: rbp === null ? null : formatAddress(rbp),
     rip: normalizeAddress(snapshot.registers.rip ?? null),
-    rspTop: rspInWindow && rsp !== null ? yFor(rsp, windowEnd) : null,
-    rbpTop: rbpInWindow && rbp !== null ? yFor(rbp, windowEnd) : null,
+    rspTop: rspInWindow && rsp !== null ? yFor(rsp, windowEnd, scale) : null,
+    rbpTop: rbpInWindow && rbp !== null ? yFor(rbp, windowEnd, scale) : null,
     frames,
     callChain,
     blocks: allBlocks,
@@ -941,6 +1338,9 @@ export function buildStackMap(snapshot: Snapshot | null): StackMapModel {
     aboveFrames,
     unplacedVariables: unplaced,
     registerVariables,
+    variableAssignments,
+    unframedBlocks,
+    unverifiedCount,
     changedCount: changeMarks.length,
     unreadableCount: snapshot.stack.unreadable_ranges.length,
     rulerTicks,
@@ -956,13 +1356,13 @@ function makeFrame(
   changedByAddress: Map<string, MemoryChange>,
   windowEnd: bigint,
   registerVariables: VariableNode[],
+  pxPerByte: number,
 ): StackFrameExtent {
-  const top = yFor(frame.end, windowEnd);
-  const height = Math.max(1, sizeFor(frame.start, frame.end));
-  const own = placed.filter((placement) => {
-    const midpoint = placement.start;
-    return midpoint >= frame.start && midpoint < frame.end;
-  });
+  const top = yFor(frame.end, windowEnd, pxPerByte);
+  const height = Math.max(1, sizeFor(frame.start, frame.end, pxPerByte));
+  // Placements were annotated against these same frame extents; a variable is
+  // only drawn inside the frame whose byte range actually contains it.
+  const own = placed.filter((placement) => placement.geometricFrameLevel === frame.level);
   const blocks: StackMapBlock[] = [];
   const knownRanges: Array<{ start: bigint; end: bigint }> = [];
 
@@ -986,10 +1386,12 @@ function makeFrame(
         changedBytes: changedInRange(changedByAddress, savedStart, savedEnd),
         readable: rangeReadable(map, savedStart, savedEnd),
         clipped: false,
-        top: yFor(savedEnd, windowEnd) - top,
-        height: sizeFor(savedStart, savedEnd),
+        top: yFor(savedEnd, windowEnd, pxPerByte) - top,
+        height: sizeFor(savedStart, savedEnd, pxPerByte),
         pin: false,
         overlaps: false,
+        assignment: null,
+        assignmentReason: null,
       };
       blocks.push(savedBlock);
       knownRanges.push({ start: savedStart, end: savedEnd });
@@ -1015,10 +1417,12 @@ function makeFrame(
         changedBytes: changedInRange(changedByAddress, returnStart, returnEnd),
         readable: rangeReadable(map, returnStart, returnEnd),
         clipped: false,
-        top: yFor(returnEnd, windowEnd) - top,
-        height: sizeFor(returnStart, returnEnd),
+        top: yFor(returnEnd, windowEnd, pxPerByte) - top,
+        height: sizeFor(returnStart, returnEnd, pxPerByte),
         pin: false,
         overlaps: false,
+        assignment: null,
+        assignmentReason: null,
       };
       blocks.push(returnBlock);
       knownRanges.push({ start: returnStart, end: returnEnd });
@@ -1026,12 +1430,12 @@ function makeFrame(
   }
 
   for (const placement of own) {
-    const block = blockFromPlacement(placement, top, windowEnd, changedByAddress, map);
+    const block = blockFromPlacement(placement, top, windowEnd, changedByAddress, map, pxPerByte);
     blocks.push(block);
     knownRanges.push({ start: placement.start, end: placement.end });
   }
 
-  const unknown = frameUnknownBlocks(frame, top, knownRanges, map, windowEnd);
+  const unknown = frameUnknownBlocks(frame, top, knownRanges, map, windowEnd, pxPerByte);
   blocks.push(...unknown.blocks);
   blocks.sort((left, right) => left.top - right.top);
 
@@ -1046,7 +1450,11 @@ function makeFrame(
     }
   }
 
-  const variables = own.map((placement) => placement.node);
+  // A frame's variable list only asserts ownership the evidence supports:
+  // level claim and address range must agree (verified assignments).
+  const variables = own
+    .filter((placement) => placement.assignment === "verified")
+    .map((placement) => placement.node);
   return {
     level: frame.level,
     function: gdbFrame?.function ?? null,
@@ -1101,7 +1509,7 @@ function buildCallChain(
 }
 
 function buildPointerLinks(
-  placed: VariablePlacement[],
+  placed: VariablePlacementBase[],
   blocks: StackMapBlock[],
   windowStart: bigint,
   windowEnd: bigint,

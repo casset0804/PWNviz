@@ -46,6 +46,8 @@ export function HeaderBar({ samples, connection, ready }: HeaderBarProps) {
   const setMode = useDebugStore((state) => state.setWorkbenchMode);
   const leftPanelCollapsed = useDebugStore((state) => state.leftPanelCollapsed);
   const rightPanelCollapsed = useDebugStore((state) => state.rightPanelCollapsed);
+  const projection = useDebugStore((state) => state.projectionMode);
+  const setProjectionMode = useDebugStore((state) => state.setProjectionMode);
   const toggleLeftPanel = useDebugStore((state) => state.toggleLeftPanel);
   const toggleRightPanel = useDebugStore((state) => state.toggleRightPanel);
   const tone = connectionTone(connection);
@@ -111,20 +113,35 @@ export function HeaderBar({ samples, connection, ready }: HeaderBarProps) {
         </span>
       </div>
 
-      {session ? (
+      {session && !projection ? (
         <span
           className="hidden min-w-0 truncate font-mono text-[12px] text-[#6a7f95] 2xl:inline"
           title={session.session_id}
         >
           {t("panels:workbench.sessionShort")} {session.session_id.slice(0, 8)}
         </span>
-      ) : (
-        <span className="hidden text-[12px] text-[#5f7388] 2xl:inline">
-          {t("panels:workbench.noSession")}
-        </span>
-      )}
+      ) : null}
 
       <div className="ml-auto flex shrink-0 items-center gap-3">
+        {mode === "presentation" ? (
+          <button
+            type="button"
+            data-testid="projection-toggle"
+            aria-pressed={projection}
+            title={t("toolbar:projectionTitle")}
+            onClick={() => setProjectionMode(!projection)}
+            className={`flex h-11 items-center gap-2 rounded-md border px-3 text-[13px] font-medium transition-colors ${
+              projection
+                ? "border-emerald-400/60 bg-emerald-500/[0.10] text-emerald-200"
+                : "border-[#2b3d51] bg-[#0a121b] text-[#7d91a7] hover:bg-[#101c27] hover:text-[#c0d2e4]"
+            }`}
+          >
+            <span aria-hidden="true" className="text-[15px] leading-none">
+              {projection ? "🖥" : "🖥"}
+            </span>
+            {t("toolbar:projection")}
+          </button>
+        ) : null}
         {mode === "developer" ? (
           <div
             className="flex h-11 items-center rounded-md border border-[#2b3d51] bg-[#0a121b] p-0.5"

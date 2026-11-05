@@ -13,6 +13,24 @@ fi
 
 CFLAGS=(-g -O0 -fno-omit-frame-pointer -fno-inline -fno-pie -no-pie)
 
+# Per-sample teaching variants. Everything outside this case keeps the
+# canonical pedagogical flags above.
+sample_cflags() {
+  case "$1" in
+    # No frame pointer: the callee never establishes RBP.
+    stack-nofp)
+      printf '%s\n' "-g -O0 -fomit-frame-pointer -fno-inline -fno-pie -no-pie"
+      ;;
+    # Compiled without DWARF; the symbol table stays for real unwinding.
+    stack-nodwarf)
+      printf '%s\n' "-g0 -O0 -fno-omit-frame-pointer -fno-inline -fno-pie -no-pie"
+      ;;
+    *)
+      printf '%s\n' "${CFLAGS[*]}"
+      ;;
+  esac
+}
+
 build_one() {
   local dir="$1"
   local id
@@ -21,9 +39,11 @@ build_one() {
     echo "skip $id: no demo.c"
     return 0
   fi
+  local flags
+  flags="$(sample_cflags "$id")"
   echo "== building $id =="
   set -x
-  gcc "${CFLAGS[@]}" -o "$dir/demo" "$dir/demo.c"
+  gcc $flags -o "$dir/demo" "$dir/demo.c"
   set +x
   file "$dir/demo" || true
 }

@@ -137,6 +137,78 @@ src/
   `RegisterPanel` 自身 `memo`，避免 Workbench 因无关状态重建子樹；
   栈行数 > 200 时才启用虚拟滚动（默认 64 行完整渲染）。
 
+### 2.4 V1.3 StackMap：缩放、归属验证与外部标注（已实现）
+
+**缩放坐标系**（`lib/stackMap.ts` + `StackMapCanvas.tsx`）：
+
+- `buildStackMap(snapshot, pxPerByte)` 是唯一布局入口；默认
+  `STACK_MAP_PX_PER_BYTE = 10`（实际比例 100%），钳制在 [1, 120]；
+- 三种缩放模式只决定 pxPerByte 的取值来源：`actual` 固定 10；
+  `fit-frame` 用当前帧真实字节数推导（`fitFramePxPerByte`）；
+  `fit-stack` 用整个栈窗口字节数推导（`fitStackPxPerByte`）；
+- 所有 Y 坐标都来自 `addressTop(model, address)` =
+  `(windowEnd - address) * model.pxPerByte`：内存块、地址标尺、
+  PointerArrow、RSP/RBP Marker、变化高亮共用同一函数，
+  因此任何缩放下地址映射零偏移；块高 = 真实字节数 × pxPerByte；
+- 缩放百分比相对实际比例（10px/byte = 100%），重置回 `actual`；
+  选择持久化在 `localStorage["pwnviz.stackZoom"]`。
+
+**变量归属三态验证**（`annotateVariableFrames`）：
+
+```text
+verified   = GDB frame_level 与包含该地址的已证帧一致
+             （或：叶函数红区——地址在帧基址之下、RSP-128B 之上、
+               且不与其他已证帧重叠；GCC12 -O0 叶函数不发 sub rsp）
+conflict   = 声明的帧可见但地址证据矛盾（在其他帧范围内 / 超出合理区域）
+             → 变量按真实地址绘制 + ⚠，绝不进入任何帧的变量列表
+unresolved = 证据不足（声明的帧不在窗口 / 无 frame_level / 地址无帧可归）
+             → 按真实地址绘制 + ?，不猜测
+```
+
+- 归属绝不根据变量名称推断；`model.variableAssignments[]` 保留
+  claimed/geometric level 与 reason，供悬停卡与头部徽章展示；
+- 窗口内但不在任何已证帧内的变量进入 `unframedBlocks`，按真实地址
+  独立绘制（V1.2 及之前会被静默丢弃）。
+
+**微型块外部标注**（`layoutGutterAnnotations`）：
+
+- 块高 `< 26px`（1–2 真实字节）时块内不放任何文字；变量名以芯片形式
+  画在帧标签列，芯片防重叠纵向排列并用引线指向块的真实中心；
+- 悬停任意块弹出 `BlockHoverCard`（名称/类型/真实值/地址范围/大小/归属证据），
+  `pointer-events-none` 不拦截点击；点击块打开底部 Inspector。
+
+**帧标题板**：`StackFrameCard` 的帧名是固定 88px 的标题板，位于帧标签列
+（地址轴之外），小帧也完整展示；`data-state = current | verified | warning`。
+
+**课堂投屏模式**：`debugStore.projectionMode`（`pwnviz.projection` 持久化）；
+隐藏 StatusBar/会话 ID/开发模式入口，教学区收成单行；演示面字号 ≥12px。
+
+**指针正交路由（V1.3.1）**：`assignPointerLanes()` 在过滤掉 NULL/窗外/不可读
+链接**之后**按 Y 序分配连续 0..n-1 通道；`pointerLaneWidth(n)` 按可见数动态
+计算路由宽度（18px/通道，上限 12 条）；`PointerArrow` 为正交折线
+（出块→独立通道垂直→入目标，圆角），同块出口/同目标入口按 6px 错开并钳制在
+块真实范围内——任何两条可见箭头不共用 lane X 或控制点。
+Presentation 默认只绘制与选中块相关的指针（无选中不画），HeaderBar
+"全部指针" 开关（`pwnviz.showAllPointers` 持久化）显示全部真实关系。
+
+**自适应标尺（V1.3.1）**：`buildRulerTicks(windowStart, windowEnd, pxPerByte, mode)`
+按缩放与模式选择步长——presentation 主刻度间距 ≥56px 且无次刻度；
+developer 8/16/32B 且次刻度仅在 ≥14px 时生成；刻度 Y 仍走 `addressTop()`。
+
+**纯色色带（V1.3.1）**：`stack-map-unknown/unreadable/quiet/above` 全部为
+纯色填充（unreadable 保留左侧红色标记），不再使用 repeating-linear-gradient。
+
+**逐字节变化标记（V1.3.1）**：`MemoryChangeOverlay` 按 `diff.changed_bytes`
+真实地址在块内逐字节定位左缘标记，tooltip 携带 `before → after`；变量显示
+changed count；底部 Inspector 列出选中块的 before/after；不再整块覆盖。
+
+**视觉回归**：两个 Playwright 套件驱动真实 GDB——
+`frontend/e2e/presentation.visual.spec.ts`（教学检查点 7 项，截图
+`docs/assets/presentation/`）与 `frontend/e2e/stackmap-clarity.spec.ts`
+（清晰度 7 项，截图 `docs/assets/stackmap-v1.3.1/`）；共享会话助手
+`frontend/e2e/gdb.ts`。运行 `scripts/run_visual_tests.sh`
+（WSL 后端 + Vite + Playwright）。
+
 ## 3. Phase 1 调试链路（已实现）
 
 ```text

@@ -21,10 +21,10 @@ export function AddressRuler({ ticks, height }: AddressRulerProps) {
       data-testid="stack-map-ruler"
     >
       <div className="absolute inset-0 bg-[#080e15]" />
-      <span className="absolute right-2 top-0 font-mono text-[11px] uppercase tracking-[0.14em] text-[#43556a]">
+      <span className="absolute right-2 top-0 font-mono text-[12px] uppercase tracking-[0.14em] text-[#43556a]">
         {t("panels:stackMap.highAddress")}
       </span>
-      <span className="absolute bottom-1 right-2 font-mono text-[11px] uppercase tracking-[0.14em] text-[#43556a]">
+      <span className="absolute bottom-1 right-2 font-mono text-[12px] uppercase tracking-[0.14em] text-[#43556a]">
         {t("panels:stackMap.lowAddress")}
       </span>
       {ticks.map((tick) => (

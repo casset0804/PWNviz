@@ -2,11 +2,23 @@ import { describe, expect, it } from "vitest";
 
 import { formatAddress } from "./address";
 import {
+  STACK_MAP_MAX_PX_PER_BYTE,
+  STACK_MAP_MIN_PX_PER_BYTE,
   STACK_MAP_PX_PER_BYTE,
+  STACK_MAP_MAX_POINTER_LANES,
+  STACK_MAP_POINTER_LANE,
+  addressTop,
+  assignPointerLanes,
+  buildRulerTicks,
+  pointerLaneWidth,
   buildStackMap,
+  fitFramePxPerByte,
+  fitStackPxPerByte,
   inferVariableSize,
+  layoutGutterAnnotations,
   readSnapshotBytes,
   resolveVariableSize,
+  zoomPercent,
 } from "./stackMap";
 import type { Snapshot, StackRow, VariableNode } from "../types/debug";
 
@@ -472,5 +484,373 @@ describe("readSnapshotBytes", () => {
     expect(bytes).toHaveLength(16);
     const missing = readSnapshotBytes(snapshot, "0x0000000000000001", 4);
     expect(missing).toEqual([null, null, null, null]);
+  });
+});
+
+describe("variable frame ownership (V1.3)", () => {
+  it("marks ownership verified when the frame_level claim agrees with the address range", () => {
+    const model = buildStackMap(makeSnapshot());
+
+    // Fixture: x/y/sum claim level 0 (add_numbers), a/b/p claim level 1 (main);
+    // every address provably sits inside the claimed frame's byte range.
+    expect(model.variableAssignments.map((entry) => entry.state)).toEqual([
+      "verified",
+      "verified",
+      "verified",
+      "verified",
+      "verified",
+      "verified",
+    ]);
+    expect(model.variableAssignments.every((e) => e.reason === "level-and-address-agree")).toBe(
+      true,
+    );
+    expect(model.unverifiedCount).toBe(0);
+    // Frame variable lists only assert verified ownership.
+    expect(model.frames[0].variables.map((node) => node.name)).toEqual(["x", "y", "sum"]);
+    expect(model.frames[1].variables.map((node) => node.name)).toEqual(["p", "a", "b"]);
+  });
+
+  it("never force-attaches a variable whose claimed level contradicts the address", () => {
+    const snapshot = makeSnapshot();
+    // `a` lives in main's locals area (0x...e290, inside frame 1) but now
+    // claims to belong to frame 0.
+    const a = snapshot.variables.find((node) => node.name === "a") as VariableNode;
+    const model = buildStackMap({
+      ...snapshot,
+      variables: snapshot.variables.map((node) =>
+        node.name === "a" ? { ...node, frame_level: 0 } : node,
+      ),
+    });
+    void a;
+
+    const entry = model.variableAssignments.find((e) => e.variableName === "a");
+    expect(entry?.state).toBe("conflict");
+    expect(entry?.reason).toBe("address-in-other-frame");
+    expect(entry?.claimedFrameLevel).toBe(0);
+    expect(entry?.geometricFrameLevel).toBe(1);
+    // Not in any frame's variable list: neither the claimed one nor the one
+    // whose byte range contains it.
+    expect(model.frames[0].variables.some((node) => node.name === "a")).toBe(false);
+    expect(model.frames[1].variables.some((node) => node.name === "a")).toBe(false);
+    // Still drawn at its true address inside the geometrically containing frame.
+    const frame1 = model.frames[1];
+    const block = frame1.blocks.find(
+      (candidate) => candidate.kind === "variable" && candidate.label === "a",
+    );
+    expect(block?.start).toBe(hex(0x7fffffffe290n));
+    expect(block?.assignment).toBe("conflict");
+    expect(model.unverifiedCount).toBe(1);
+  });
+
+  it("reports a conflict when the claimed frame is visible but the address lies outside it", () => {
+    const snapshot = makeSnapshot();
+    const model = buildStackMap({
+      ...snapshot,
+      variables: [
+        variable({
+          name: "ghost",
+          type: "long",
+          size_bytes: 8,
+          address: hex(0x7fffffffe2b8n), // above main's frame end (0x...e2b0)
+          value: "0",
+          frame_level: 1,
+        }),
+      ],
+    });
+
+    const entry = model.variableAssignments.find((e) => e.variableName === "ghost");
+    expect(entry?.state).toBe("conflict");
+    expect(entry?.reason).toBe("address-outside-claimed-frame");
+    expect(entry?.geometricFrameLevel).toBeNull();
+    // Drawn standalone at its true address, never inside a frame.
+    const standalone = model.unframedBlocks.find((block) => block.label === "ghost");
+    expect(standalone?.start).toBe(hex(0x7fffffffe2b8n));
+    expect(standalone?.assignment).toBe("conflict");
+    expect(model.frames.every((frame) => !frame.variables.some((n) => n.name === "ghost"))).toBe(
+      true,
+    );
+  });
+
+  it("stays unresolved instead of guessing when the claimed frame is not drawn", () => {
+    const snapshot = makeSnapshot();
+    const model = buildStackMap({
+      ...snapshot,
+      variables: [
+        variable({
+          name: "far",
+          type: "int",
+          size_bytes: 4,
+          address: hex(0x7fffffffe26cn), // inside add_numbers' frame
+          value: "1",
+          frame_level: 5, // level 5 is in the GDB chain but not provable here
+        }),
+      ],
+    });
+
+    const entry = model.variableAssignments.find((e) => e.variableName === "far");
+    expect(entry?.state).toBe("unresolved");
+    expect(entry?.reason).toBe("claimed-frame-not-visible");
+    // The block is still rendered at the real address, flagged as unresolved.
+    const block = model.frames[0].blocks.find(
+      (candidate) => candidate.kind === "variable" && candidate.label === "far",
+    );
+    expect(block?.assignment).toBe("unresolved");
+    expect(model.unverifiedCount).toBe(1);
+  });
+
+  it("keeps variables outside every drawn frame visible with unresolved ownership", () => {
+    const snapshot = makeSnapshot();
+    const model = buildStackMap({
+      ...snapshot,
+      variables: [
+        variable({
+          name: "orphan",
+          type: "int",
+          size_bytes: 4,
+          address: hex(0x7fffffffe2c4n), // above all verified frame extents
+          value: "7",
+          frame_level: 2, // level 2 exists in the call chain, outside the window
+        }),
+      ],
+    });
+
+    const entry = model.variableAssignments.find((e) => e.variableName === "orphan");
+    expect(entry?.state).toBe("unresolved");
+    // Neither the claimed frame nor any frame range covers this address, so
+    // there is no evidence at all to attribute ownership from.
+    expect(entry?.reason).toBe("outside-verified-frames");
+    const standalone = model.unframedBlocks.find((block) => block.label === "orphan");
+    expect(standalone?.start).toBe(hex(0x7fffffffe2c4n));
+    expect(standalone?.top).toBe(
+      Number(WINDOW_END - 0x7fffffffe2c8n) * STACK_MAP_PX_PER_BYTE,
+    );
+  });
+});
+
+describe("stack map zoom (V1.3)", () => {
+  it("scales the whole drawing with one shared px/byte while addresses stay exact", () => {
+    const snapshot = makeSnapshot();
+    const actual = buildStackMap(snapshot);
+    const zoomed = buildStackMap(snapshot, 2.5);
+    const span = Number(WINDOW_END - WINDOW_START);
+
+    expect(zoomed.pxPerByte).toBe(2.5);
+    expect(zoomed.contentHeight).toBe(span * 2.5);
+    // Same block set, same real extents.
+    expect(zoomed.blocks.map((b) => `${b.start}-${b.end}`)).toEqual(
+      actual.blocks.map((b) => `${b.start}-${b.end}`),
+    );
+    const zoomedX = zoomed.blocks.find((b) => b.label === "x");
+    const actualX = actual.blocks.find((b) => b.label === "x");
+    expect(zoomedX?.height).toBe(4 * 2.5);
+    expect(actualX?.height).toBe(4 * STACK_MAP_PX_PER_BYTE);
+    // Same coordinate system everywhere: the block's top edge sits exactly at
+    // addressTop() of its real end address, inside its frame.
+    const zoomedFrame0 = zoomed.frames[0];
+    const zoomedXEnd = zoomedX?.end ?? null;
+    expect(addressTop(zoomed, zoomedXEnd)! - zoomedFrame0.top).toBe(zoomedX?.top);
+    // Marker and ruler share the transform.
+    expect(zoomed.rspTop).toBe(Number(WINDOW_END - RSP) * 2.5);
+    // Ticks sit on byte-row edges; the lowest may peek one scale below.
+    expect(
+      zoomed.rulerTicks.every((tick) => tick.top <= zoomed.contentHeight + zoomed.pxPerByte),
+    ).toBe(true);
+  });
+
+  it("clamps px/byte so the drawing never collapses or explodes", () => {
+    const snapshot = makeSnapshot();
+    expect(buildStackMap(snapshot, 5000).pxPerByte).toBe(STACK_MAP_MAX_PX_PER_BYTE);
+    expect(buildStackMap(snapshot, 0.001).pxPerByte).toBe(STACK_MAP_MIN_PX_PER_BYTE);
+    expect(buildStackMap(snapshot, Number.NaN).pxPerByte).toBe(STACK_MAP_PX_PER_BYTE);
+  });
+
+  it("derives fit scales from the viewport without touching addresses", () => {
+    const snapshot = makeSnapshot();
+    const span = Number(WINDOW_END - WINDOW_START);
+    const frameBytes = 40; // add_numbers frame: rsp..rbp+16
+
+    const stackScale = fitStackPxPerByte(800, span);
+    expect(stackScale).toBeCloseTo((800 - 24) / span, 5);
+    const frameScale = fitFramePxPerByte(800, frameBytes);
+    expect(frameScale).toBeCloseTo((800 - 48) / frameBytes, 5);
+
+    const model = buildStackMap(snapshot, stackScale);
+    expect(model.contentHeight).toBeLessThanOrEqual(800);
+    // The block for `x` keeps its real 4-byte extent.
+    const x = model.blocks.find((b) => b.label === "x");
+    expect(Number(BigInt(x!.end) - BigInt(x!.start))).toBe(4);
+
+    expect(fitStackPxPerByte(0, span)).toBe(STACK_MAP_PX_PER_BYTE);
+    expect(fitFramePxPerByte(800, 0)).toBe(STACK_MAP_PX_PER_BYTE);
+  });
+
+  it("reports zoom percentage relative to the actual teaching scale", () => {
+    expect(zoomPercent(STACK_MAP_PX_PER_BYTE)).toBe(100);
+    expect(zoomPercent(5)).toBe(50);
+    expect(zoomPercent(20)).toBe(200);
+  });
+});
+
+describe("gutter annotations for micro blocks (V1.3)", () => {
+  const micro = (id: string, top: number, height: number) => ({
+    id,
+    kind: "variable" as const,
+    label: id,
+    top,
+    height,
+    assignment: "verified" as const,
+  });
+
+  it("annotates blocks below the micro threshold with non-overlapping chips", () => {
+    // char (10 px) directly above short (20 px) — anchors are 15 px apart.
+    const chips = layoutGutterAnnotations(
+      [micro("c", 0, 10), micro("s", 10, 20), micro("big", 30, 40)],
+      { minTop: 0 },
+    );
+
+    expect(chips.map((chip) => chip.label)).toEqual(["c", "s"]);
+    // First chip centres on its anchor; the second is pushed below the first.
+    expect(chips[0].chipTop).toBe(0);
+    expect(chips[1].chipTop).toBeGreaterThanOrEqual(chips[0].chipTop + 18);
+    // Leader anchors still point at the real blocks.
+    expect(chips[0].anchorTop).toBe(5);
+    expect(chips[1].anchorTop).toBe(20);
+  });
+
+  it("keeps chips outside the reserved header zone when asked", () => {
+    const chips = layoutGutterAnnotations([micro("c", 0, 10)], { minTop: 88 });
+    expect(chips[0].chipTop).toBe(88);
+    expect(chips[0].anchorTop).toBe(5);
+  });
+});
+
+describe("leaf-function red-zone locals (V1.3)", () => {
+  it("verifies locals below RSP when the claimed frame provably owns the region", () => {
+    const snapshot = makeSnapshot();
+    // Leaf functions (gcc -O0 keeps RSP unchanged) place locals below RSP.
+    // 0x...e258 sits below the add_numbers frame start (RSP) but above the
+    // window bottom, and frame 0 is drawn: the evidence is consistent.
+    const model = buildStackMap({
+      ...snapshot,
+      variables: [
+        variable({
+          name: "red",
+          type: "int",
+          size_bytes: 4,
+          address: hex(0x7fffffffe258n), // below RSP=e260, inside the window
+          value: "3",
+          frame_level: 0,
+        }),
+      ],
+    });
+
+    const entry = model.variableAssignments.find((e) => e.variableName === "red");
+    expect(entry?.state).toBe("verified");
+    expect(entry?.reason).toBe("within-frame-region");
+    expect(entry?.geometricFrameLevel).toBe(0);
+    // Counted as a real variable of frame 0.
+    expect(model.frames[0].variables.some((node) => node.name === "red")).toBe(true);
+  });
+
+  it("still reports a conflict when the address is below every drawn frame region", () => {
+    const snapshot = makeSnapshot();
+    const model = buildStackMap({
+      ...snapshot,
+      stack: {
+        ...snapshot.stack,
+        // Push the window bottom down so the address falls outside the
+        // plausible region [windowStart, frame0 base+16].
+        range_start: hex(0x7fffffffe100n),
+      },
+      variables: [
+        variable({
+          name: "deep",
+          type: "int",
+          size_bytes: 4,
+          address: hex(0x7fffffffe150n),
+          value: "1",
+          frame_level: 0,
+        }),
+      ],
+    });
+    const entry = model.variableAssignments.find((e) => e.variableName === "deep");
+    // 0x110 bytes below RSP is past the 128-byte red zone: a live level-0
+    // local cannot legally sit there, so this is a positive contradiction.
+    expect(entry?.state).toBe("conflict");
+    expect(entry?.reason).toBe("address-outside-claimed-frame");
+  });
+});
+
+describe("pointer lane assignment (V1.3.1)", () => {
+  const link = (name: string) => ({ id: `ptr:${name}`, laneIndex: 99, name });
+
+  it("assigns dense unique lanes AFTER filtering, for 1/4/5/10 visible links", () => {
+    for (const count of [1, 4, 5, 10]) {
+      const links = Array.from({ length: count }, (_, index) => link(`v${index}`));
+      const routed = assignPointerLanes(links, (entry) => entry.laneIndex);
+      // order key irrelevant here; what matters: dense 0..n-1, unique, count preserved
+      expect(routed).toHaveLength(count);
+      const lanes = routed.map((entry) => entry.laneIndex).sort((a, b) => a - b);
+      expect(lanes).toEqual(Array.from({ length: count }, (_, index) => index));
+      expect(new Set(lanes).size).toBe(count);
+    }
+  });
+
+  it("orders lanes by the given geometry key (exit Y)", () => {
+    const links = [
+      { id: "a", laneIndex: 7, fromTop: 300 },
+      { id: "b", laneIndex: 7, fromTop: 100 },
+      { id: "c", laneIndex: 7, fromTop: 200 },
+    ];
+    const routed = assignPointerLanes(links, (entry) => entry.fromTop);
+    expect(routed.map((entry) => entry.id)).toEqual(["b", "c", "a"]);
+    expect(routed.map((entry) => entry.laneIndex)).toEqual([0, 1, 2]);
+  });
+
+  it("grows the routing area linearly with the visible count and caps lanes", () => {
+    expect(pointerLaneWidth(0)).toBe(12);
+    expect(pointerLaneWidth(1)).toBe(1 * STACK_MAP_POINTER_LANE + 20);
+    expect(pointerLaneWidth(4)).toBe(4 * STACK_MAP_POINTER_LANE + 20);
+    expect(pointerLaneWidth(10)).toBe(10 * STACK_MAP_POINTER_LANE + 20);
+    // Beyond the cap every drawn arrow still has its own X: lanes never share.
+    expect(pointerLaneWidth(30)).toBe(STACK_MAP_MAX_POINTER_LANES * STACK_MAP_POINTER_LANE + 20);
+  });
+});
+
+describe("adaptive ruler ticks (V1.3.1)", () => {
+  const START = 0x7fffffffe200n;
+  const END = 0x7fffffffe300n; // 256 bytes
+
+  it("presentation mode: major ticks only, spaced >= 56 px, addresses aligned", () => {
+    const ticks = buildRulerTicks(START, END, 10, "presentation");
+    // 256 bytes at 10 px/byte: a 32-byte step = 320 px >= 56, so no minors.
+    expect(ticks.every((tick) => tick.major)).toBe(true);
+    expect(ticks.length).toBeLessThanOrEqual(256 / 32 + 2);
+    const tops = ticks.map((tick) => tick.top).sort((a, b) => a - b);
+    for (let index = 1; index < tops.length; index += 1) {
+      expect(tops[index] - tops[index - 1]).toBeGreaterThanOrEqual(56);
+    }
+    // Address labels sit exactly at their byte row (same addressTop transform).
+    const tick = ticks[0];
+    expect(tick.top).toBe(Number(END - BigInt(tick.address)) * 10 + 10);
+  });
+
+  it("developer mode: denser majors and minor ticks when they fit", () => {
+    const ticks = buildRulerTicks(START, END, 10, "developer");
+    const majors = ticks.filter((tick) => tick.major);
+    const minors = ticks.filter((tick) => !tick.major);
+    expect(majors.length).toBeGreaterThanOrEqual(256 / 32);
+    // 16-byte minors at 10 px/byte = 160 px apart, comfortably readable.
+    expect(minors.length).toBeGreaterThan(0);
+  });
+
+  it("scales the step with zoom so labels never crowd", () => {
+    // Zoomed out: 1 px/byte -> the 32-byte step is only 32 px, so the ruler
+    // must move to a larger step.
+    const ticks = buildRulerTicks(START, END, 1, "presentation");
+    const tops = ticks.map((tick) => tick.top).sort((a, b) => a - b);
+    for (let index = 1; index < tops.length; index += 1) {
+      expect(tops[index] - tops[index - 1]).toBeGreaterThanOrEqual(56);
+    }
   });
 });

@@ -45,5 +45,7 @@
   "mode": "Mode",
   "focusMap": "Locate stack map",
   "openSource": "Source",
-  "openDisassembly": "Disassembly"
+  "openDisassembly": "Disassembly",
+  "projection": "Projection",
+  "projectionTitle": "Projection mode: hide developer info, logs and secondary panels"
 }
