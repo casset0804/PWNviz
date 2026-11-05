@@ -9,6 +9,8 @@ from app.schemas.session import (
     ActionRequest,
     ActionResponse,
     CreateSessionRequest,
+    PerfReport,
+    RefreshRequest,
     SessionInfo,
     SnapshotsResponse,
 )
@@ -42,12 +44,37 @@ async def launch_session(session_id: str) -> ActionResponse:
 @router.post("/{session_id}/actions", response_model=ActionResponse)
 async def run_action(session_id: str, payload: ActionRequest) -> ActionResponse:
     session = session_manager.require(session_id)
-    state, snapshot = await session.action(payload.action)
+    state, snapshot = await session.action(payload.action, mode=payload.mode)
     return ActionResponse(
         session_id=session.session_id,
         state=state.value,
         snapshot=snapshot,
     )
+
+
+@router.post("/{session_id}/refresh", response_model=ActionResponse)
+async def refresh_snapshot(
+    session_id: str, payload: RefreshRequest | None = None
+) -> ActionResponse:
+    """Re-read frames/variables/disassembly for the current stop.
+
+    This is the explicit "refresh variables" path: it never runs the inferior and
+    never reuses a cached value as if it were freshly measured.
+    """
+    session = session_manager.require(session_id)
+    mode = payload.mode if payload is not None else "full"
+    snapshot = await session.refresh(mode=mode)
+    return ActionResponse(
+        session_id=session.session_id,
+        state=session.state.value,
+        snapshot=snapshot,
+    )
+
+
+@router.get("/{session_id}/performance", response_model=PerfReport)
+async def session_performance(session_id: str) -> PerfReport:
+    session = session_manager.require(session_id)
+    return PerfReport(**session.perf_report())
 
 
 @router.get("/{session_id}/snapshots", response_model=SnapshotsResponse)

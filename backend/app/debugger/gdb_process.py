@@ -91,7 +91,13 @@ class GdbProcess:
             process.stdin,
             process.stdout,
             process.stderr,
-            time_to_check_for_additional_output_sec=0.1,
+            # pygdbmi waits this long after a record to see whether more output
+            # belongs to the same batch. The MI controller correlates records by
+            # token and queues async notifications, so a short window only means
+            # the next record is delivered on the following read — it cannot be
+            # lost. The default 0.1s added ~200ms to *every* MI round trip, which
+            # dominated single-step latency.
+            time_to_check_for_additional_output_sec=self.settings.gdb_mi_settle_seconds,
         )
         return process.pid
 

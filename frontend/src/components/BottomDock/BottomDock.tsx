@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 import type { Capabilities, SampleInfo } from "../../types/api";
 import { useDebugStore, type BottomTab } from "../../stores/debugStore";
 import { DebugLogPanel } from "../DebugLogPanel/DebugLogPanel";
@@ -17,13 +19,21 @@ interface BottomDockProps {
   onVerifyPwndbg: () => void;
 }
 
-const TABS: Array<{ id: BottomTab; label: string; meta: string }> = [
-  { id: "memory", label: "Memory Inspector", meta: "selected byte" },
-  { id: "variables", label: "Variables", meta: "DWARF locals" },
-  { id: "diff", label: "Diff", meta: "byte + register" },
-  { id: "explanation", label: "Explanation", meta: "measured effects" },
-  { id: "log", label: "Debug Log", meta: "session events" },
-  { id: "environment", label: "Environment", meta: "host probes" },
+const TABS: Array<{ id: BottomTab; labelKey: string; metaKey: string }> = [
+  { id: "memory", labelKey: "panels:dock.memory", metaKey: "panels:dock.memoryMeta" },
+  { id: "variables", labelKey: "panels:dock.variables", metaKey: "panels:dock.variablesMeta" },
+  { id: "diff", labelKey: "panels:dock.diff", metaKey: "panels:dock.diffMeta" },
+  {
+    id: "explanation",
+    labelKey: "panels:dock.explanation",
+    metaKey: "panels:dock.explanationMeta",
+  },
+  { id: "log", labelKey: "panels:dock.log", metaKey: "panels:dock.logMeta" },
+  {
+    id: "environment",
+    labelKey: "panels:dock.environment",
+    metaKey: "panels:dock.environmentMeta",
+  },
 ];
 
 export function BottomDock({
@@ -35,6 +45,7 @@ export function BottomDock({
   onRefresh,
   onVerifyPwndbg,
 }: BottomDockProps) {
+  const { t } = useTranslation(["panels", "common"]);
   const bottomTab = useDebugStore((state) => state.bottomTab);
   const setBottomTab = useDebugStore((state) => state.setBottomTab);
   const bottomDockCollapsed = useDebugStore((state) => state.bottomDockCollapsed);
@@ -47,7 +58,7 @@ export function BottomDock({
       className={`flex shrink-0 flex-col border-t border-[#1a2431] bg-[#0b1017] ${
         bottomDockCollapsed ? "h-8" : "h-[clamp(9.5rem,21vh,15rem)]"
       }`}
-      aria-label="Inspector dock"
+      aria-label={t("panels:dock.aria")}
       data-testid="bottom-dock"
     >
       <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-[#1a2431] bg-[#090e15] px-2">
@@ -64,7 +75,7 @@ export function BottomDock({
               key={tab.id}
               type="button"
               data-testid={`tab-${tab.id}`}
-              title={tab.meta}
+              title={t(tab.metaKey)}
               onClick={() => {
                 setBottomTab(tab.id);
                 if (bottomDockCollapsed) toggleBottomDock();
@@ -76,7 +87,7 @@ export function BottomDock({
                   : "border-transparent text-[#68798d] hover:bg-[#0d141d] hover:text-[#b6c5d6]"
               }`}
             >
-              <span>{tab.label}</span>
+              <span>{t(tab.labelKey)}</span>
               {badge !== null ? (
                 <span className="min-w-3 border border-emerald-500/20 bg-emerald-500/[0.08] px-1 text-[8px] leading-3 text-emerald-300">
                   {badge}
@@ -89,11 +100,19 @@ export function BottomDock({
           type="button"
           onClick={toggleBottomDock}
           data-testid="dock-toggle"
-          aria-label={bottomDockCollapsed ? "Expand inspector dock" : "Collapse inspector dock"}
-          title={bottomDockCollapsed ? "Expand inspector dock" : "Collapse inspector dock"}
+          aria-label={
+            bottomDockCollapsed
+              ? t("panels:dock.expandDock")
+              : t("panels:dock.collapseDock")
+          }
+          title={
+            bottomDockCollapsed
+              ? t("panels:dock.expandDock")
+              : t("panels:dock.collapseDock")
+          }
           className="ml-auto grid h-6 w-6 place-items-center border border-[#202c3b] bg-[#0d141d] font-mono text-[11px] leading-none text-[#718297] hover:border-[#3a4b60] hover:text-[#c6d3e2]"
         >
-          {bottomDockCollapsed ? "⌃" : "⌄"}
+          {bottomDockCollapsed ? "▲" : "▼"}
         </button>
       </div>
 

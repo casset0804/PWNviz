@@ -1,0 +1,23 @@
+{
+  "title": "debugger error",
+  "selectSampleFirst": "Select a teaching sample before launching.",
+  "terminateFailed": "terminate failed: {{message}}",
+  "restartFailed": "restart failed: {{message}}",
+  "refreshFailed": "refresh failed: {{message}}",
+  "backendUnreachable": "Backend unreachable at {{base}} ({{reason}}). Start it with scripts/dev_backend.sh inside WSL.",
+  "requestFailed": "Request failed with HTTP {{status}}",
+  "invalidRequest": "Request validation failed.",
+  "invalidSessionState": "Session is {{state}}; this action requires {{required}}.",
+  "sessionClosed": "The session was closed{{reasonSuffix}}.",
+  "tooManySessions": "Too many active debug sessions (max {{maxActive}}).",
+  "sampleNotFound": "Unknown sample {{sampleId}}.",
+  "sampleNotBuilt": "Sample {{sampleId}} has no compiled binary.",
+  "debuggerUnavailable": "GDB is not available on this host.",
+  "debuggerTimeout": "GDB did not respond in time: {{message}}",
+  "debuggerError": "Debugger error: {{message}}",
+  "crossSiteBlocked": "Cross-site browser requests are not allowed.",
+  "internalError": "Internal backend error.",
+  "sessionGone": "The session no longer exists on the backend.",
+  "unknownProbe": "Unknown error while probing the backend.",
+  "listSamplesFailed": "Failed to list samples."
+}

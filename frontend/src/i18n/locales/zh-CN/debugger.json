@@ -1,0 +1,43 @@
+{
+  "state": {
+    "idle": "空闲",
+    "created": "已创建",
+    "initializing": "初始化中",
+    "ready": "就绪",
+    "running": "运行中",
+    "stopped": "已停止",
+    "exited": "已退出",
+    "error": "错误",
+    "terminated": "已终止",
+    "working": "处理中…",
+    "action": "动作",
+    "stop": "停止原因",
+    "rip": "RIP",
+    "snap": "快照",
+    "stream": "事件流",
+    "gdb": "GDB",
+    "inferior": "目标进程",
+    "breakpoint": "断点 {{number}} @ {{address}}",
+    "breakpoints": "{{count}} 个断点",
+    "debugState": "状态：{{state}}",
+    "stopSuffix": " · 停止原因：{{reason}}",
+    "snapshotCount": "快照数 {{count}}",
+    "perfTitle": "最近一次快照（{{mode}}）：总计 {{total}} ms、{{commands}} 条 GDB/MI 命令、{{bytes}} 字节\n寄存器 {{registers}} / 栈帧 {{frames}} / 反汇编 {{disassembly}} / 内存 {{memory}} / 变量 {{variables}} / 差异 {{diff}} ms\n序列化 {{serialize}} ms · WebSocket 发送 {{ws}} ms",
+    "perfSummary": "{{total}} ms · {{commands}} MI",
+    "perfModeFast": "快速",
+    "perfModeFull": "完整"
+  },
+  "log": {
+    "creating": "正在为 {{sampleId}} 创建会话",
+    "launching": "正在启动 {{sessionId}}",
+    "attached": "已附加到 {{sessionId}}",
+    "action": "动作 {{action}}",
+    "state": "会话状态 {{state}}",
+    "terminated": "会话已终止",
+    "restarting": "正在重启会话",
+    "variablesRefreshed": "变量已刷新（完整快照）",
+    "breakpoints": "断点已更新（{{count}}）",
+    "streamUnavailable": "经过 5 次重连后实时事件流仍不可用",
+    "sessionGone": "后端已不存在该会话（是否重启过？）"
+  }
+}

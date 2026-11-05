@@ -1,0 +1,31 @@
+{
+  "app": {
+    "name": "PWNviz",
+    "subtitle": "内存调试工作台",
+    "title": "PWNviz 真实 GDB 内存调试教学平台"
+  },
+  "collapse": "折叠 {{title}}",
+  "expand": "展开 {{title}}",
+  "collapsed": "{{label}} 已折叠",
+  "changed": "已变更",
+  "unknown": "未知",
+  "unreadable": "不可读",
+  "none": "无",
+  "dismiss": "关闭",
+  "refresh": "刷新",
+  "reload": "重新加载",
+  "noSnapshot": "暂无快照",
+  "stale": "缓存",
+  "fresh": "实时",
+  "deferred": "待刷新",
+  "rowCount": "{{count}} 行",
+  "byteCount": "{{count}} 字节",
+  "noData": "无数据",
+  "language": {
+    "label": "语言",
+    "current": "当前语言：{{language}}",
+    "switchTo": "切换到 {{language}}",
+    "zh": "简体中文",
+    "en": "English"
+  }
+}

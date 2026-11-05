@@ -1,10 +1,12 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 
-import { explainStep } from "../../lib/explain";
+import { explainStep, type Translate } from "../../lib/explain";
 import { useDebugStore } from "../../stores/debugStore";
 import { StatusBadge } from "../common/StatusBadge";
 
 export function ExplanationPanel() {
+  const { t } = useTranslation(["panels", "explanation", "common"]);
   const snapshot = useDebugStore((state) => state.snapshot);
   const previousSnapshot = useDebugStore((state) => state.previousSnapshot);
   const selectedInstructionAddress = useDebugStore(
@@ -12,18 +14,22 @@ export function ExplanationPanel() {
   );
   const lastAction = useDebugStore((state) => state.lastAction);
 
+  const translate = useCallback<Translate>(
+    (key, params) => String(t(`explanation:${key}`, (params ?? {}) as never)),
+    [t],
+  );
+
   const explanation = useMemo(
-    () => explainStep(previousSnapshot, snapshot, lastAction),
-    [previousSnapshot, snapshot, lastAction],
+    () => explainStep(previousSnapshot, snapshot, lastAction, translate),
+    [previousSnapshot, snapshot, lastAction, translate],
   );
 
   if (!snapshot) {
     return (
       <div className="flex h-full flex-col gap-2 p-4">
-        <StatusBadge tone="idle">no snapshot</StatusBadge>
+        <StatusBadge tone="idle">{t("panels:explanation.noSnapshot")}</StatusBadge>
         <p className="max-w-2xl text-[11px] leading-5 text-slate-500">
-          Explanations are generated only from a real before/after snapshot. No instruction
-          simulator or guessed semantics are used.
+          {t("panels:explanation.emptyHint")}
         </p>
       </div>
     );
@@ -34,24 +40,30 @@ export function ExplanationPanel() {
     snapshot.disassembly.find((line) => line.address === selectedInstructionAddress) ?? null;
 
   return (
-    <div className="space-y-3 p-4">
+    <div className="space-y-3 p-4" data-testid="explanation-panel" data-matched={explanation.matched ? "true" : "false"}>
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge tone={explanation.matched ? "ok" : "info"}>
-          {explanation.matched ? `rule: ${explanation.rule}` : "measured differences only"}
+          {explanation.matched
+            ? t("panels:explanation.rule", { rule: explanation.rule })
+            : t("panels:explanation.measuredOnly")}
         </StatusBadge>
         <span className="font-mono text-[10px] text-slate-600">
-          executed from snapshot #{previousSnapshot?.snapshot_id ?? "?"} → current #
-          {snapshot.snapshot_id}
+          {t("panels:explanation.executedFrom", {
+            from: previousSnapshot?.snapshot_id ?? "?",
+            to: snapshot.snapshot_id,
+          })}
         </span>
         <span className="font-mono text-[10px] text-slate-600">
-          action: {lastAction ?? "attached/unknown"}
+          {t("panels:explanation.action", {
+            action: lastAction ?? t("panels:explanation.attached"),
+          })}
         </span>
       </div>
 
       <div className="grid gap-3 xl:grid-cols-[1.15fr_1fr]">
         <section className="rounded border border-[#1e2635] bg-[#0d1117] p-3">
           <h3 className="text-[10px] uppercase tracking-[0.14em] text-slate-500">
-            last executed instruction
+            {t("panels:explanation.lastInstruction")}
           </h3>
           {executedInstruction ? (
             <>
@@ -59,13 +71,15 @@ export function ExplanationPanel() {
                 {executedInstruction.address} · {executedInstruction.text}
               </div>
               <div className="mt-1 font-mono text-[10px] text-slate-600">
-                bytes {executedInstruction.bytes ?? "unavailable"} · mnemonic{" "}
-                {executedInstruction.mnemonic ?? "unknown"}
+                {t("panels:explanation.bytes")}{" "}
+                {executedInstruction.bytes ?? t("panels:explanation.unavailable")} ·{" "}
+                {t("panels:explanation.mnemonic")}{" "}
+                {executedInstruction.mnemonic ?? t("panels:explanation.unknownMnemonic")}
               </div>
             </>
           ) : (
             <p className="mt-1 font-mono text-[10px] text-slate-600">
-              No previous snapshot; execution history starts here.
+              {t("panels:explanation.noPrevious")}
             </p>
           )}
 
@@ -81,7 +95,7 @@ export function ExplanationPanel() {
           {snapshot.instruction ? (
             <div className="mt-3 border-t border-[#1e2635] pt-2">
               <div className="text-[10px] uppercase tracking-[0.14em] text-slate-600">
-                next instruction (current RIP, not executed yet)
+                {t("panels:explanation.nextInstruction")}
               </div>
               <div className="mt-1 font-mono text-[11px] text-slate-300">
                 {snapshot.instruction.address} · {snapshot.instruction.text}
@@ -92,7 +106,7 @@ export function ExplanationPanel() {
           {selected ? (
             <div className="mt-3 border-t border-[#1e2635] pt-2">
               <div className="text-[10px] uppercase tracking-[0.14em] text-slate-600">
-                selected line (not necessarily RIP)
+                {t("panels:explanation.selectedLine")}
               </div>
               <div className="mt-1 font-mono text-[11px] text-slate-300">
                 {selected.address} · {selected.text}
@@ -103,7 +117,7 @@ export function ExplanationPanel() {
 
         <section className="rounded border border-[#1e2635] bg-[#0d1117] p-3">
           <h3 className="text-[10px] uppercase tracking-[0.14em] text-slate-500">
-            verified before → after facts
+            {t("panels:explanation.verifiedFacts")}
           </h3>
           <ul className="mt-2 space-y-1 font-mono text-[10px] leading-5 text-slate-400">
             {explanation.facts.map((fact) => (
@@ -111,19 +125,19 @@ export function ExplanationPanel() {
             ))}
           </ul>
           <p className="mt-3 text-[10px] leading-5 text-slate-500">
-            RBP is shown only as a register. PWNviz does not assume it is a fixed frame base, and
-            does not label the space between RSP and RBP as local variables.
+            {t("panels:explanation.rbpNote")}
           </p>
           {snapshot.stack.unreadable_ranges.length > 0 ? (
             <p className="mt-2 font-mono text-[10px] text-rose-300/80">
-              {snapshot.stack.unreadable_ranges.length} unreadable range(s); unknown bytes are not
-              treated as zero.
+              {t("panels:explanation.unreadableNote", {
+                count: snapshot.stack.unreadable_ranges.length,
+              })}
             </p>
           ) : null}
           {snapshot.warnings.length > 0 ? (
             <div className="mt-3 border-t border-[#1e2635] pt-2">
               <div className="text-[10px] uppercase tracking-[0.14em] text-amber-300/80">
-                warnings
+                {t("panels:explanation.warnings")}
               </div>
               <ul className="mt-1 space-y-1 font-mono text-[10px] text-amber-200/80">
                 {snapshot.warnings.slice(0, 6).map((warning) => (

@@ -17,9 +17,76 @@ PWNviz 已经是一个能真实启动 Linux ELF、通过持久 GDB/MI3 单步、
 
 ---
 
+## 1.1 V1.1 增量：性能与中英双语（2026-11-05）
+
+V1.1 没有更换技术栈、没有删除真实 GDB 链路、没有引入 mock 数据。它做了两件事：
+让单步快一个数量级以上，并让整个工作台支持中英双语（默认简体中文）。
+
+### 性能：真实 100 步（GDB 12.1，`samples/stack-basic/demo`）
+
+| 指标 | V1.0（HEAD 4813c99） | V1.1 | 变化 |
+|---|---|---|---|
+| 单步 p50 | 2630.51 ms | **45.84 ms** | 57.4× |
+| 单步 mean | 2582.91 ms | 61.84 ms | 41.8× |
+| MI 命令/步 p50 | 26 | **4** | 6.5× |
+| MI 命令/步 mean | 25.52 | 5.44 | 4.7× |
+| 栈读取命令/步 | 9.00 | 1.12 | 8× |
+| 变量命令/步 | 12.52 | 2.08 | 6× |
+| launch 快照 | 3535.9 ms / 34 MI | 350.9 ms / 24 MI | 10.1× |
+| 前端 commits/快照 | 2.22 | 1.04 | 2.1× |
+| StackMemoryView p50 | 5.3 ms | 0.3 ms | 17.7× |
+
+归因（同样 settle=0.1s 时）：2630.51 → 406.59 ms 来自命令数减少；再把 pygdbmi 的
+批次收敛窗口从 0.1s 调到 0.01s 后到 45.84 ms。完整表格、复现命令和已知成本见
+[PERFORMANCE.md](PERFORMANCE.md)。
+
+### 架构变化（全部向后兼容）
+
+- Fast / Full 两级快照：默认 Fast，launch 与 `POST /refresh` 为 Full；
+- 栈窗口一条批量读取，失败自动分块回退，不可读字节仍为 `null`；
+- 变量对象跨快照缓存，用 `-var-update` 增量刷新；帧变化才删除重建；
+- 反汇编窗口缓存（含每条指令真实字节与抓取快照号）；
+- 帧刷新仅在 `call`/`ret`/`finish`/`continue` 等证据下发生，不用 RBP 判断；
+- `Snapshot.perf` 随每张快照发送；`GET /sessions/{id}/performance` 提供 p50/p95；
+- 新增可选字段：`mode`、`frames_state`、`variables_state`、
+  `frames_version`、`variables_version`、`perf`；旧客户端可忽略。
+
+### 国际化
+
+- `i18next` + `react-i18next`，默认 `zh-CN`，`localStorage["pwnviz.locale"]`；
+- 7 个命名空间 × 2 语言，键集合由测试强制一致；
+- 全 UI（含空状态、tooltip、aria-label、错误、解释）已翻译；
+- 技术标识符（寄存器/指令/变量/符号/地址/字节/GDB 原文）保持原样；
+- 后端错误改为稳定 `code` + `params`，前端本地化，GDB 原文不丢失；
+- 详见 [I18N.md](I18N.md)。
+
+### 测试
+
+```text
+Backend: 135 passed（含真实 GDB 集成）
+Frontend: 38 passed / 6 files
+Build: tsc --noEmit + vite build 成功（403.36 kB / 121.61 kB gzip）
+E2E: node scripts/ui_smoke.mjs -> ok: true
+     默认 zh-CN、切 en-US、刷新后保持
+Frontend perf: 100 次真实单步，DOM 行复用 100%，选中地址保持
+```
+
+新增覆盖：单条指令真实寄存器变化与**精确到地址的 byte diff**、512 字节批量读取、
+批量失败分块回退、Fast 不重建变量树、Full 刷新局部变量、变量缓存更新/销毁、
+反汇编缓存失效重建、中英切换与持久化、连续更新无大面积重渲染。
+
+### 仍未解决
+
+- 帧变化步仍较慢（约 19 条命令 / 200 ms），这是变量重建的真实成本；
+- payload 增大约 7%（携带 `perf`），选择诚实上报而非隐藏测量；
+- 安全隔离（容器/多用户）、源码视图、断点增删仍未做；
+- 只支持 Linux x86-64 + GDB 12.1+。
+
+---
+
 ## 2. 已验证的核心闭环
 
-真实 E2E 最近一次结果（`scripts/ui_smoke.mjs`，真实 GDB + Edge CDP）：
+真实 E2E 最近一次结果（`scripts/ui_smoke.mjs`，真实 GDB + Edge CDP，V1.1）：
 
 ```json
 {
@@ -28,17 +95,28 @@ PWNviz 已经是一个能真实启动 Linux ELF、通过持久 GDB/MI3 单步、
     "rip": "0x0000000000401160",
     "rsp": "0x00007fffffffe210",
     "rbp": "0x00007fffffffe220",
-    "rows": 64
+    "rows": 64,
+    "markers": 2
   },
   "after": {
     "snapshot": "snap #2",
     "rip": "0x0000000000401167",
     "changedCells": 1,
-    "changedLabels": 1
+    "changedRows": 1,
+    "virtualized": "false",
+    "stackRows": 64
   },
   "breakpoints": "bp 1 @ 0x0000000000401160",
   "debugLogHasGdb": true,
   "variablesHaveProvenance": true,
+  "language": {
+    "defaultLocale": "zh-CN",
+    "switched": "en-US",
+    "storedLocale": "en-US",
+    "persistedAfterReload": true
+  },
+  "stepPerf": { "ms": 36.314, "mi": 3, "mode": "fast" },
+  "renderPerf": { "stackCommits": 12 },
   "layoutCollapse": {
     "stackWidthBefore": 1128,
     "stackWidthAfter": 1399
@@ -49,7 +127,7 @@ PWNviz 已经是一个能真实启动 Linux ELF、通过持久 GDB/MI3 单步、
     "rspInside": "0x00007fffffffe200",
     "rspAfterFinish": "0x00007fffffffe210",
     "ripInside": "0x0000000000401144",
-    "exited": "Exited",
+    "exited": "EXITED",
     "restarted": true
   },
   "terminated": true
@@ -187,64 +265,83 @@ FastAPI / asyncio
 
 ```text
 backend/app/
-├── debugger/       GdbProcess, MIController, pwndbg loader
-├── sessions/       DebugSession, SessionManager, idle reaper
-├── collector/      registers, frames, memory, disassembly, variables, snapshot
-├── analysis/       byte/register diff
-├── api/            sessions, websocket, capabilities, samples
-└── schemas/        Snapshot / Session / VariableNode
+├── debugger/       GdbProcess (settle 可配置), MIController (+perf 计数), pwndbg loader
+├── sessions/       DebugSession (fast/full + refresh + perf), SessionManager, idle reaper
+├── collector/      registers, frames (刷新策略), memory (批量+回退),
+│                   disassembly (窗口缓存), variables (varobj 缓存), snapshot (fast/full)
+├── analysis/       byte/register diff, perf.py (单调时钟 Profiler)
+├── api/            sessions (+refresh/+performance), websocket (+ws_send_ms),
+│                   capabilities, samples
+└── schemas/        Snapshot (+perf/缓存状态) / Session / VariableNode
 
 frontend/src/
 ├── app/            Workbench
-├── components/     Toolbar, StatusBar, Disassembly, StackMemory, Registers,
-│                   BottomDock, MemoryInspector, VariablesPanel, Explanation, Log
+├── components/     Toolbar (+LanguageSwitch), StatusBar (+perf), Disassembly,
+│                   StackMemory (memo/虚拟化), Registers, BottomDock,
+│                   MemoryInspector, VariablesPanel (+刷新按钮), Explanation, Log
+├── i18n/           i18next 初始化 + locales/{zh-CN,en-US}/ 7 个命名空间
 ├── stores/         single debug store, WS reconnect/dedupe
-├── lib/            BigInt address, snapshot derivations, explanations
-└── services/       REST + WS client
+├── lib/            BigInt address, snapshot derivations, explanations (可注入翻译),
+│                   virtualWindow, renderPerf
+└── services/       REST + WS client (code+params 错误)
 
 samples/stack-basic/demo.c
-scripts/ui_smoke.mjs
-docs/ARCHITECTURE.md, API.md, DEVELOPMENT.md, SECURITY.md, PHASES.md
+scripts/ui_smoke.mjs, benchmark_stepping.py, perf_frontend.mjs
+scripts/run_backend_tests.sh
+docs/ARCHITECTURE.md, API.md, DEVELOPMENT.md, SECURITY.md, PHASES.md,
+docs/PERFORMANCE.md, docs/I18N.md, docs/benchmarks/*.json
 ```
 
 ---
 
 ## 5. 真实测试状态
 
-最近一次实际执行：
+最近一次实际执行（V1.1）：
 
 ```text
 Backend:
-123 passed, 1 warning in 144.79s
+135 passed, 1 warning in 29.65s
 
 Frontend:
-Test Files 4 passed (4)
-Tests 25 passed (25)
+Test Files 6 passed (6)
+Tests 38 passed (38)
 
 Build:
 tsc --noEmit && vite build: success
-dist/assets/index-*.js 302.09 kB
+dist/assets/index-*.js 403.36 kB (121.61 kB gzip)
 
 E2E:
 node scripts/ui_smoke.mjs -> ok: true
-```
+  默认 zh-CN → 切 en-US → 刷新后保持
 
+Backend benchmark (100 real steps):
+  baseline p50 2630.51 ms / 26 MI
+  optimized p50  45.84 ms /  4 MI
+
+Frontend render benchmark (100 real steps):
+  commits/snapshot 1.04, StackMemoryView p50 0.3 ms,
+  DOM 行复用 100%，选中地址保持
+```
 测试特点：
 
 - 真实 GDB 集成测试未删除、未改成 mock；
 - 真实测试覆盖 launch / step / diff / finish / continue / exit / cleanup；
 - 变量矩阵测试真实 gcc + gdb；
 - 真实 WebSocket 测试；
-- 真实 UI E2E 覆盖 Run、StepI、Step Into、RSP、Finish、Continue、Restart、Variables、Debug Log、布局折叠。
+- 真实 UI E2E 覆盖 Run、StepI、Step Into、RSP、Finish、Continue、Restart、Variables、Debug Log、布局折叠、中英切换与持久化；
+- V1.1 新增：精确到地址的 byte diff、批量读取/回退、fast/full 契约、
+  变量缓存更新/销毁、反汇编缓存失效、单步性能门限（MI < 26）。
 
 已知测试缺口：
 
 - 没有 CI；
-- 没有精确断言“某个栈地址的 before/after byte”；
-- 没有 50 次连续 Step 压力测试；
+- ~~没有精确断言"某个栈地址的 before/after byte"~~ 已由
+  `tests/integration/test_fast_snapshot.py` 覆盖；
+- ~~没有 50 次连续 Step 压力测试~~ 已由 100 步 benchmark 覆盖（非断言型）；
 - 没有慢 WS 客户端/丢事件注入测试；
 - 没有真实后端 SIGKILL 清理测试；
-- 没有像素级视觉回归。
+- 没有像素级视觉回归；
+- 没有 arm64/其他 GDB 版本的性能矩阵。
 
 ---
 

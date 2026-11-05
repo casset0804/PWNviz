@@ -1,4 +1,4 @@
-# API 参考（Phase 3）
+# API 参考（V1.1）
 
 Base URL：`http://127.0.0.1:8000`（WSL 内 uvicorn）。
 前端开发服务器 `http://127.0.0.1:5173` 通过 Vite proxy 转发 `/api` 与 `/health`。
@@ -8,12 +8,17 @@ Base URL：`http://127.0.0.1:8000`（WSL 内 uvicorn）。
 ```json
 {
   "error": {
-    "code": "sample_not_found",
-    "message": "Unknown sample 'x'.",
+    "code": "invalid_session_state",
+    "message": "Session is RUNNING; this action requires STOPPED.",
+    "params": { "state": "RUNNING", "required": "STOPPED" },
     "detail": { "available": ["stack-basic"] }
   }
 }
 ```
+
+`params` 是 V1.1 新增的可选结构化参数，供前端本地化（见
+[docs/I18N.md §5](I18N.md)）；`message` 保持英文原文以便日志与旧客户端使用，
+GDB 自身返回的文本永远原样保留。
 
 | HTTP | `code` | 场景 |
 |---|---|---|
@@ -327,7 +332,8 @@ GDB 启动/命令失败 → `502 debugger_error`，会话进入 `ERROR` 并回�
 
 ## POST `/api/v1/sessions/{session_id}/actions`
 
-请求：`{"action": "step_instruction"}`。动作白名单：
+请求：`{"action": "step_instruction"}`，可选 `{"mode": "fast"|"full"}`。
+动作白名单：
 
 | action | GDB/MI 命令 | 语义 |
 |---|---|---|
@@ -346,6 +352,49 @@ GDB 启动/命令失败 → `502 debugger_error`，会话进入 `ERROR` 并回�
   `snapshot` 通过 WebSocket 推送；REST 轮询 `GET /sessions/{id}` 也可观察；
 - 非 `STOPPED`（step 类）或非 `RUNNING`（interrupt）返回 `409`；
 - 快速连点：第二个请求会因状态变为 `RUNNING` 被拒绝，不会并发写 GDB。
+- `mode` 省略时使用 `PWNVIZ_SNAPSHOT_MODE`（默认 `fast`）；`launch` 始终为
+  `full`。
+
+## POST `/api/v1/sessions/{session_id}/refresh`
+
+不执行任何指令，只对当前停止点重新采集（帧、反汇编、DWARF 变量）。请求可选：
+
+```json
+{ "mode": "full" }
+```
+
+响应与动作响应相同（`state` + `snapshot`），新快照的
+`variables_state="full"`、`frames_state="fresh"`。这是变量面板「刷新变量」
+按钮的接口；仅 `STOPPED` 状态可用，否则 `409 invalid_session_state`。
+
+## GET `/api/v1/sessions/{session_id}/performance`
+
+返回最近一次与最近 20 次快照的性能数据及 p50/p95 聚合：
+
+```json
+{
+  "session_id": "sess_...",
+  "last": { "snapshot_id": 12, "mode": "fast", "total_ms": 46.2,
+            "registers_ms": 9.1, "frames_ms": 0.0, "disassembly_ms": 0.1,
+            "memory_ms": 9.4, "variables_ms": 5.2, "diff_ms": 0.2,
+            "serialize_ms": 1.8, "broadcast_ms": 0.1, "ws_send_ms": 0.4,
+            "mi_command_count": 4, "mi_time_ms": 35.8,
+            "stack_read_commands": 1, "variable_commands": 1,
+            "memory_batch_reads": 1, "memory_chunk_reads": 0,
+            "payload_bytes": 18410, "disassembly_source": "cache",
+            "frames_state": "cached", "variables_state": "updated" },
+  "samples": 12,
+  "aggregate": {
+    "total_ms": { "count": 12, "min": 42.1, "p50": 46.2, "p95": 61.0,
+                  "max": 61.0, "mean": 47.5 },
+    "mi_command_count": { "count": 12, "p50": 4, "p95": 6, "max": 6, "mean": 4.2 }
+  },
+  "recent": [ { "snapshot_id": 12, "...": "..." } ]
+}
+```
+
+历史长度由 `PWNVIZ_PERF_HISTORY_SIZE`（默认 120）限制。
+`ws_send_ms` 只在这里出现（WebSocket 发送发生在快照发布之后）。
 
 ## GET `/api/v1/sessions/{session_id}/snapshots`
 
@@ -497,9 +546,49 @@ GDB 启动/命令失败 → `502 debugger_error`，会话进入 `ERROR` 并回�
     }
   ],
   "variables_available": true,
-  "warnings": []
+  "warnings": [],
+  "mode": "fast",
+  "frames_state": "cached",
+  "frames_stale": true,
+  "frames_version": 1,
+  "variables_state": "updated",
+  "variables_stale": false,
+  "variables_version": 2,
+  "perf": {
+    "snapshot_id": 2,
+    "mode": "fast",
+    "total_ms": 46.2,
+    "registers_ms": 9.1,
+    "frames_ms": 0.0,
+    "disassembly_ms": 0.1,
+    "memory_ms": 9.4,
+    "variables_ms": 5.2,
+    "diff_ms": 0.2,
+    "serialize_ms": 1.8,
+    "broadcast_ms": 0.1,
+    "ws_send_ms": null,
+    "mi_command_count": 4,
+    "mi_time_ms": 35.8,
+    "mi_by_command": { "-exec-step-instruction": 1,
+      "-data-list-register-values": 1, "-data-read-memory-bytes": 1,
+      "-var-update": 1 },
+    "stack_read_commands": 1,
+    "memory_batch_reads": 1,
+    "memory_chunk_reads": 0,
+    "memory_degraded": false,
+    "variable_commands": 1,
+    "disassembly_source": "cache",
+    "disassembly_version": 1,
+    "payload_bytes": 18410
+  }
 }
 ```
+
+> V1.1 新增字段（`mode`、`frames_*`、`variables_*`、`perf`）均可选，旧客户端
+> 可忽略。`current_value` 语义：
+> `variables_state=updated` 表示用 `-var-update` 增量刷新过，值是当前值；
+> `cached` 表示刷新失败、展示上次测量值且 `variables_stale=true`；
+> `deferred` 表示 Fast 快照没有可用变量缓存（用 `/refresh` 触发完整读取）。
 
 > `variables_available=false` 表示没有 DWARF 变量信息；此时 raw stack 和
 > registers 仍然完整。`source=dwarf` / `confidence=debug-info` 表示类型、值和
@@ -512,8 +601,9 @@ GDB 启动/命令失败 → `502 debugger_error`，会话进入 `ERROR` 并回�
 
 ### 不可读内存表示
 
-GDB 对不可读区域返回 `^error`（例如跨未映射页）。采集器按 64 字节分块读取，
-失败块继续采集其余块，并显式表示：
+GDB 对不可读区域返回 `^error`（例如跨未映射页）。V1.1 默认用**一条**
+`-data-read-memory-bytes` 读取整个窗口（≤ `PWNVIZ_MEMORY_BATCH_MAX_BYTES`）；
+批量失败或只返回部分字节时自动降级为 64 字节分块并只抢救缺失区间，仍显式表示：
 
 - `rows[].bytes[i]` 为 `null`，而不是 `"00"` 或伪值；
 - 含未知字节的行 `readable=false`，`qword_le`/`ascii` 为 `null`；

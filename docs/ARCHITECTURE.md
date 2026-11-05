@@ -48,8 +48,9 @@
 | `app/debugger/pwndbg_loader.py` | 可选 `source gdbinit.py`，失败仅 warning | 已实现 |
 | `app/sessions/session.py` | 单会话状态机、串行化动作、快照、订阅推送 | 已实现 |
 | `app/sessions/manager.py` | 会话注册表、数量上限、空闲 reaper、终止与 shutdown 清理 | 已实现 |
-| `app/collector/*` | 寄存器、frames、RSP 内存分块、RIP 反汇编、快照组装 | 已实现 |
+| `app/collector/*` | 寄存器、frames（带刷新策略）、批量 RSP 内存、带版本缓存的反汇编、变量对象缓存、快照组装（fast/full） | 已实现 |
 | `app/analysis/diff.py` | 按地址的字节级 diff + 寄存器 diff | 已实现 |
+| `app/analysis/perf.py` | 单调时钟 Profiler、MI 命令计数、阶段耗时、p50/p95 汇总 | 已实现 |
 | `app/api/routes_sessions.py` | 会话 REST API | 已实现 |
 | `app/api/websocket.py` | 单会话事件流（Origin/会话校验） | 已实现 |
 | `app/samples/registry.py` | 扫描 `samples/*/demo.c`、读取 README、计算编译命令 | 已实现 |
@@ -107,12 +108,16 @@ src/
 │   └── BottomDock/            Memory / Variables / Diff / Explanation / Log / Environment
 ├── hooks/useCapabilities.ts   探测请求、verify pwndbg、错误状态
 ├── hooks/useSamples.ts        样例列表
+├── i18n/                      i18next 初始化 + locales/{zh-CN,en-US}/ 七个命名空间
+├── components/common/LanguageSwitch.tsx  中英切换（无需刷新）
 ├── lib/address.ts             地址解析/格式化/比较（BigInt，无 Number 地址）
 ├── lib/snapshot.ts            同一 snapshot 派生 marker/选中 cell/previous 值
-├── lib/explain.ts             push/pop/mov/sub rsp/add rsp/call/ret/leave/nop
-├── services/api.ts            REST + WebSocket URL，统一错误映射
+├── lib/explain.ts             push/pop/mov/sub rsp/add rsp/call/ret/leave/nop（可注入翻译）
+├── lib/virtualWindow.ts       固定行高虚拟窗口（>200 行才启用）
+├── lib/renderPerf.ts          React Profiler 环形缓冲（StackMemoryView）
+├── services/api.ts            REST + WebSocket URL，统一错误映射（code+params）
 ├── stores/debugStore.ts       Zustand 单一 debug 状态 + WS 重连/去重/状态单调性
-└── types/api.ts, debug.ts     与后端 schema 对齐的类型
+└── types/api.ts, debug.ts     与后端 schema 对齐的类型（含 perf / 缓存状态）
 ```
 
 数据一致性：
@@ -126,7 +131,11 @@ src/
   计数才使用 Number；
 - `diff.changed_bytes` 的绝对地址用于 byte cell 高亮，动画 220ms，可关闭；
 - WS/REST 快照按 `snapshot_id` 去重，避免同一快照重复渲染/闪烁；
-- 无 snapshot 时显示 empty state，不展示 fixture/伪造寄存器值。
+- 无 snapshot 时显示 empty state，不展示 fixture/伪造寄存器值；
+- V1.1 渲染层：`ByteCell` / `StackRowView` 用 `React.memo` + 原始值 props，
+  行模型每张快照只构建一次；`StackMemoryView` / `DisassemblyView` /
+  `RegisterPanel` 自身 `memo`，避免 Workbench 因无关状态重建子樹；
+  栈行数 > 200 时才启用虚拟滚动（默认 64 行完整渲染）。
 
 ## 3. Phase 1 调试链路（已实现）
 
@@ -224,7 +233,12 @@ sequenceDiagram
 ### 3.4 栈窗口
 
 以 RSP 为中心：下方 0x80、上方 0x180，总长 ≤ 0x400，按 8 字节对齐。
-分块读取，不可读块标记 `readable=false`，不允许整体失败。
+
+V1.1 起默认用**一条** `-data-read-memory-bytes` 读取整个 0x200 窗口
+（`PWNVIZ_MEMORY_BATCH_MAX_BYTES`，默认 0x400）。窗口大于上限时自动分段；批量命令
+失败或只返回部分字节时，自动降级为 0x40 分块读取并只对缺失区间抢救。不可读块标记
+`readable=false` 并列入 `unreadable_ranges`，**不允许整体失败，也不允许写成 0**。
+`perf.memory_batch_reads / memory_chunk_reads / memory_degraded` 记录真实读取路径。
 
 ### 3.5 数据真实性
 
@@ -240,6 +254,66 @@ sequenceDiagram
 - 无 DWARF：变量列表为空，raw stack/registers 不受影响；
 - 解释：仅基于 before/after 实测，规则未覆盖时只陈述变化。
 
+### 3.6 V1.1 两级采集：Fast Snapshot 与 Full Snapshot
+
+| 模式 | 何时使用 | 采集内容 | 不采集 |
+|---|---|---|---|
+| `fast` | 每次单步、continue 后的普通停止 | 寄存器、栈内存 + diff、当前指令（缓存反汇编）、缓存帧（显式标注）、`-var-update` 增量变量 | 不重建变量树、不重复 unwind/反汇编 |
+| `full` | `launch`、`POST /refresh`、`mode="full"` 的动作 | 强制 unwind、重新取反汇编窗口、完整变量收集/增量更新 | — |
+
+- 初始快照固定 `full`，保证第一屏就有真实局部变量；
+- `PWNVIZ_SNAPSHOT_MODE` 可改默认模式，`ActionRequest.mode` 可按动作覆盖；
+- 帧实例变化时 Fast 也会重建该帧的变量对象（否则没有正确数据可展示），
+  这是唯一例外，且只发生在进出函数时；
+- 快照新增字段：
+  `mode`、`frames_state`、`frames_stale`、`frames_version`、
+  `variables_state`、`variables_stale`、`variables_version`、`perf`。
+  旧客户端可忽略这些字段。
+
+### 3.7 变量对象缓存与 `-var-update`
+
+`app/collector/variables.py` 持有 `VariableCache`：
+
+- 变量对象跨快照保留，不再每步 `-var-create`/`-var-delete`；
+- 同帧刷新用 `-var-update --all-values *`（1 条命令）；
+- 复合类型用 `-var-list-children --all-values` 刷新子值；
+- 指针值变化时清空旧目标字节并按预算重读；未重读的标记 `target_source="cache"`；
+- 帧实例变化、变量名集合变化、`in_scope=false`、`type_changed=true`、
+  超出对象预算（默认 192）时删除旧对象并重建；
+- 会话终止时删除全部变量对象；
+- 每个节点保留 `source` / `confidence`。
+
+状态：`full` / `updated` / `cached` / `deferred` / `unavailable`，语义见
+[docs/PERFORMANCE.md §3.3](PERFORMANCE.md)。
+
+### 3.8 反汇编窗口缓存
+
+- 抓取时同时记录指令文本、地址、函数、**每条指令的真实字节**和抓取快照号；
+- RIP 在窗口内且位于已知指令边界 → 0 条命令；
+- RIP 离开窗口或落到未知边界 → 重新抓取；
+- `perf.disassembly_source`（`gdb`/`cache`/`none`）与
+  `perf.disassembly_version` 可审计。
+
+### 3.9 帧刷新策略（证据驱动）
+
+刷新条件：动作为 `finish`/`continue`/`launch`/`step`/`next`；刚执行
+`call`/`callq`/`ret`/`retq`；stop reason 为 `breakpoint-hit` 等；或达到
+`PWNVIZ_FRAME_REFRESH_INTERVAL`（默认 12）张快照的安全上限。
+
+**不使用 RBP 判断帧变化。** 未刷新时 `frames_state="cached"`、
+`frames_stale=true`。变量缓存失效使用帧身份
+`(level, function, file, 帧数, 调用者返回地址)`；当前 PC 不参与身份判断。
+
+### 3.10 性能采集
+
+- `PerfRecorder` 用单调时钟记录寄存器/帧/反汇编/内存/变量/diff 六个阶段；
+- `MIController.perf` 记录每条命令的耗时与计数（含超时/失败命令）；
+- 会话层在发布前测量 `model_dump + json.dumps` 与 payload 字节数
+  （`serialize_ms`、`payload_bytes`），WebSocket 端点在 `send_json` 后记录真实
+  发送耗时（`ws_send_ms`）；
+- `GET /api/v1/sessions/{id}/performance` 返回最近一次 + 最近 20 次 + 聚合；
+- 详细数据与对比见 [docs/PERFORMANCE.md](PERFORMANCE.md)。
+
 ## 4. 前后端协议
 
 Phase 1 已提供 REST + WebSocket：
@@ -252,6 +326,25 @@ Phase 1 已提供 REST + WebSocket：
 | `debugger.output` | GDB/MI 可读输出，`stream` + `text` + 单调 `seq` | 已实现 |
 | `breakpoints.updated` | 初始断点列表 | 已实现（暂无增删 API） |
 | `session.terminated` | 清理完成 | 已实现 |
+
+V1.1 的 `snapshot.payload` 增加（均为可选，旧客户端忽略）：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `mode` | `"fast" \| "full"` | 采集模式 |
+| `frames_state` / `frames_stale` / `frames_version` | string / bool / int | 帧是本次读取还是缓存 |
+| `variables_state` / `variables_stale` / `variables_version` | string / bool / int | 变量完整/增量/缓存/延迟 |
+| `perf` | object | 阶段耗时、MI 命令数、payload 字节、序列化耗时 |
+
+新增 REST：
+
+| Method | Endpoint | 说明 |
+|---|---|---|
+| POST | `/api/v1/sessions/{id}/refresh` | 不执行指令，重新采集当前停止点（帧/反汇编/变量） |
+| GET | `/api/v1/sessions/{id}/performance` | 最近一次 + 最近 20 次 + p50/p95 聚合 |
+
+错误体新增可选的 `params`（稳定 code 的结构化参数），见
+[docs/I18N.md §5](I18N.md)。
 
 快照消息按 `snapshot_id` 单调接受；较小 id 不覆盖当前快照。输出消息按 `seq`
 去重。状态更新在客户端做终态单调保护（EXITED/ERROR/TERMINATED 不被晚到的
@@ -266,4 +359,6 @@ RUNNING/STOPPED 覆盖）。
 - 不把 pwndbg 终端输出当 API；
 - 不假设 RBP 一定是帧指针；
 - 不在未隔离时执行不可信 ELF；
-- 不引入数据库、消息队列或微服务。
+- 不引入数据库、消息队列或微服务；
+- 不为了性能减少真实数据（快照永远不会用 mock、零填充或「上次的值」冒充当前值；
+  缓存一定有显式状态字段）。

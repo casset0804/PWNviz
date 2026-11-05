@@ -1,0 +1,26 @@
+{
+  "language": "界面语言",
+  "languageTitle": "切换界面语言，无需刷新页面；选择会保存在本机",
+  "animations": "差异动效",
+  "perf": "性能",
+  "perfTitle": "显示最近一次快照的耗时与 GDB/MI 命令数",
+  "mode": "快照模式",
+  "modeFast": "快速快照",
+  "modeFull": "完整快照",
+  "stages": {
+    "registers": "寄存器",
+    "frames": "栈帧",
+    "disassembly": "反汇编",
+    "memory": "内存",
+    "variables": "变量",
+    "diff": "差异",
+    "serialize": "序列化"
+  },
+  "sources": {
+    "gdb": "GDB",
+    "cache": "缓存",
+    "none": "无"
+  },
+  "refreshVariables": "刷新变量",
+  "refreshVariablesTitle": "让 GDB 重新读取当前帧的 DWARF 变量（不执行指令）"
+}

@@ -1,15 +1,18 @@
+import { memo } from "react";
+import { useTranslation } from "react-i18next";
+
 import { previousRegisterValue } from "../../lib/snapshot";
 import { useDebugStore } from "../../stores/debugStore";
 import { Panel } from "../common/Panel";
 
-const REGISTER_GROUPS: Array<{ title: string; registers: string[] }> = [
-  { title: "pointers", registers: ["RIP", "RSP", "RBP"] },
-  { title: "general", registers: ["RAX", "RBX", "RCX", "RDX", "RSI", "RDI"] },
+const REGISTER_GROUPS: Array<{ key: string; registers: string[] }> = [
+  { key: "pointers", registers: ["RIP", "RSP", "RBP"] },
+  { key: "general", registers: ["RAX", "RBX", "RCX", "RDX", "RSI", "RDI"] },
   {
-    title: "extended",
+    key: "extended",
     registers: ["R8", "R9", "R10", "R11", "R12", "R13", "R14", "R15"],
   },
-  { title: "flags", registers: ["EFLAGS"] },
+  { key: "flags", registers: ["EFLAGS"] },
 ];
 
 function registerTone(register: string): { text: string; border: string; bg: string } {
@@ -29,7 +32,10 @@ interface RegisterPanelProps {
   onCollapse?: () => void;
 }
 
-export function RegisterPanel({ onCollapse }: RegisterPanelProps) {
+export const RegisterPanel = memo(function RegisterPanel({
+  onCollapse,
+}: RegisterPanelProps) {
+  const { t } = useTranslation(["panels", "common"]);
   const snapshot = useDebugStore((state) => state.snapshot);
   const previousSnapshot = useDebugStore((state) => state.previousSnapshot);
   const requestScroll = useDebugStore((state) => state.requestScroll);
@@ -39,8 +45,8 @@ export function RegisterPanel({ onCollapse }: RegisterPanelProps) {
 
   return (
     <Panel
-      title="Registers"
-      hint="x86-64 / live"
+      title={t("panels:registers.title")}
+      hint={t("panels:registers.hint")}
       className="min-w-0"
       onCollapse={onCollapse}
       actions={
@@ -49,15 +55,19 @@ export function RegisterPanel({ onCollapse }: RegisterPanelProps) {
             className={`h-1.5 w-1.5 ${snapshot ? "bg-emerald-400" : "bg-slate-600"}`}
             aria-hidden="true"
           />
-          {snapshot ? "stopped" : session ? "running" : "no values"}
+          {snapshot
+            ? t("panels:registers.stopped")
+            : session
+              ? t("panels:registers.running")
+              : t("panels:registers.noValues")}
         </span>
       }
     >
       <div className="space-y-2.5 p-2">
         {REGISTER_GROUPS.map((group) => (
-          <div key={group.title}>
+          <div key={group.key}>
             <h3 className="mb-1 flex items-center gap-1.5 font-mono text-[8px] uppercase tracking-[0.18em] text-[#4e5f73]">
-              <span>{group.title}</span>
+              <span>{t(`panels:registers.${group.key}`)}</span>
               <span className="h-px flex-1 bg-[#151f2b]" aria-hidden="true" />
             </h3>
             <ul>
@@ -81,8 +91,11 @@ export function RegisterPanel({ onCollapse }: RegisterPanelProps) {
                       disabled={!isMarker || !value}
                       title={
                         isMarker && value
-                          ? `Center Stack Memory on ${register} ${value}`
-                          : `${register} from the current GDB snapshot`
+                          ? t("panels:registers.centerTitle", {
+                              register,
+                              value,
+                            })
+                          : t("panels:registers.snapshotTitle", { register })
                       }
                       className={`w-full px-1.5 py-[3px] text-left font-mono text-[10px] leading-[14px] transition-colors odd:bg-[#0e151e] ${
                         isMarker
@@ -94,7 +107,11 @@ export function RegisterPanel({ onCollapse }: RegisterPanelProps) {
                         <span className={`shrink-0 ${tone.text}`}>{register}</span>
                         <span
                           className={`min-w-0 text-right ${
-                            isChanged ? "text-emerald-200" : value ? "text-[#c4d1de]" : "text-[#3f4c5c]"
+                            isChanged
+                              ? "text-emerald-200"
+                              : value
+                                ? "text-[#c4d1de]"
+                                : "text-[#3f4c5c]"
                           }`}
                         >
                           {value ?? "—"}
@@ -102,9 +119,16 @@ export function RegisterPanel({ onCollapse }: RegisterPanelProps) {
                       </span>
                       {isChanged ? (
                         <span className="mt-0.5 flex items-baseline justify-between gap-2 text-[8px]">
-                          <span className="uppercase tracking-[0.1em] text-emerald-400/70">changed</span>
-                          <span className="min-w-0 truncate text-[#5c6d80]" title={`before: ${before ?? "?"}`}>
-                            was {before ?? "?"}
+                          <span className="uppercase tracking-[0.1em] text-emerald-400/70">
+                            {t("panels:registers.changed")}
+                          </span>
+                          <span
+                            className="min-w-0 truncate text-[#5c6d80]"
+                            title={t("panels:registers.was", {
+                              value: before ?? "?",
+                            })}
+                          >
+                            {t("panels:registers.was", { value: before ?? "?" })}
                           </span>
                         </span>
                       ) : null}
@@ -117,9 +141,9 @@ export function RegisterPanel({ onCollapse }: RegisterPanelProps) {
         ))}
 
         <div className="border-t border-[#1a2431] pt-1.5 font-mono text-[8px] leading-4 text-[#4e5f73]">
-          GDB/MI3 live values · click RSP/RBP to center stack
+          {t("panels:registers.footer")}
         </div>
       </div>
     </Panel>
   );
-}
+});

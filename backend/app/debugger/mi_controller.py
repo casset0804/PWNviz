@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from app.analysis.perf import MICounters, monotonic_ms
 from app.core.config import Settings
 from app.core.logging import get_logger
 from app.debugger.gdb_process import GdbProcess, GdbProcessError
@@ -97,6 +98,9 @@ class MIController:
         self.warnings: list[str] = []
         self.last_command_error: str | None = None
         self._inferior_starttime: str | None = None
+        # Monotonic MI command accounting shared with the snapshot profiler.
+        # Two perf_counter calls plus two dict updates per command only.
+        self.perf = MICounters()
 
     # ------------------------------------------------------------------ lifecycle
     @property
@@ -258,6 +262,7 @@ class MIController:
             asyncio.get_running_loop().create_future()
         )
         self._pending[token] = future
+        started = monotonic_ms()
         try:
             async with self._write_lock:
                 await asyncio.to_thread(self._gdb.write, f"{token}{command}")
@@ -272,6 +277,9 @@ class MIController:
             raise MIError(str(exc)) from exc
         finally:
             self._pending.pop(token, None)
+            # Every attempt is accounted for, including timeouts and errors:
+            # hiding a slow/failed command would make the perf report lie.
+            self.perf.record(command, monotonic_ms() - started)
 
         message = record.get("message")
         if message == "error":

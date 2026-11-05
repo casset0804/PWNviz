@@ -100,6 +100,68 @@ export type VariableLocationKind =
   | "unavailable"
   | "unknown";
 
+export type SnapshotMode = "fast" | "full";
+export type VariablesState =
+  | "full"
+  | "updated"
+  | "cached"
+  | "deferred"
+  | "unavailable";
+export type FramesState = "fresh" | "cached" | "unavailable";
+
+/** Measured cost of one snapshot; every duration is monotonic milliseconds. */
+export interface SnapshotPerf {
+  snapshot_id: number;
+  mode: SnapshotMode;
+  total_ms: number;
+  registers_ms: number;
+  frames_ms: number;
+  disassembly_ms: number;
+  memory_ms: number;
+  variables_ms: number;
+  diff_ms: number;
+  serialize_ms: number | null;
+  broadcast_ms: number | null;
+  ws_send_ms: number | null;
+  frames_state: FramesState;
+  variables_state: VariablesState;
+  frames_refreshed: boolean;
+  disassembly_source: "gdb" | "cache" | "none";
+  disassembly_version: number | null;
+  mi_command_count: number;
+  mi_time_ms: number;
+  mi_by_command: Record<string, number>;
+  mi_by_command_ms: Record<string, number>;
+  registers_commands: number;
+  frames_commands: number;
+  disassembly_commands: number;
+  memory_commands: number;
+  stack_read_commands: number;
+  memory_batch_reads: number;
+  memory_chunk_reads: number;
+  memory_degraded: boolean;
+  variable_commands: number;
+  diff_commands: number;
+  payload_bytes: number;
+}
+
+export interface PerfSummary {
+  count: number;
+  min: number;
+  p50: number;
+  p95: number;
+  max: number;
+  mean: number;
+}
+
+export interface PerfReport {
+  session_id: string;
+  last: SnapshotPerf | null;
+  samples: number;
+  aggregate: Record<string, PerfSummary>;
+  recent: SnapshotPerf[];
+}
+
 export interface VariableNode {
   name: string;
   type: string;
@@ -138,6 +200,15 @@ export interface Snapshot {
   variables: VariableNode[];
   variables_available: boolean;
   warnings: string[];
+  /** V1.1 additive fields (older backends omit them). */
+  mode?: SnapshotMode;
+  frames_state?: FramesState;
+  frames_stale?: boolean;
+  frames_version?: number | null;
+  variables_state?: VariablesState;
+  variables_stale?: boolean;
+  variables_version?: number | null;
+  perf?: SnapshotPerf | null;
 }
 
 export interface ActionResponse {

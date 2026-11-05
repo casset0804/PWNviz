@@ -1,0 +1,46 @@
+{
+  "generated_at": "2026-11-05T08:48:51.624Z",
+  "protocol": {
+    "steps": 100,
+    "reset_every": 25
+  },
+  "snapshots": 100,
+  "restarts": 4,
+  "failures": 0,
+  "backend_step_ms": {
+    "count": 100,
+    "min": 77.4,
+    "p50": 88.35,
+    "p95": 276.62,
+    "max": 346.4,
+    "mean": 110.722
+  },
+  "backend_mi_commands": {
+    "count": 100,
+    "min": 3,
+    "p50": 3,
+    "p95": 18,
+    "max": 18,
+    "mean": 4.26
+  },
+  "react": {
+    "commits": 222,
+    "commits_per_snapshot": 2.22,
+    "stack_render_ms": {
+      "count": 222,
+      "min": 3.9,
+      "p50": 5.3,
+      "p95": 25.385,
+      "max": 31.9,
+      "mean": 8.436
+    },
+    "profiler_mean_ms": 8.436,
+    "profiler_max_ms": 31.9
+  },
+  "dom": {
+    "reused_rows": 6383,
+    "compared_rows": 6383,
+    "reuse_ratio": 1,
+    "selection_kept": true
+  }
+}

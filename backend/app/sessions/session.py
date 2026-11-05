@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import re
 import secrets
 import time
 from collections import deque
 from pathlib import Path
 
+from app.analysis.perf import monotonic_ms, summarise_durations
 from app.collector.snapshot import SnapshotCollector
 from app.core.config import Settings
 from app.core.errors import (
@@ -29,7 +31,7 @@ from app.debugger.pwndbg_loader import load_pwndbg
 from app.samples.registry import SampleRecord
 from app.schemas.common import utc_now_iso
 from app.schemas.session import SessionInfo
-from app.schemas.snapshot import Snapshot
+from app.schemas.snapshot import Snapshot, SnapshotPerf
 from app.sessions.state import SessionState
 
 logger = get_logger("pwnviz.session")
@@ -124,6 +126,20 @@ class DebugSession:
         self._output_seq = 0
         self._last_activity = time.monotonic()
 
+        # V1.1 snapshot modes and measured performance.
+        self.snapshot_mode_default = (
+            settings.snapshot_mode_default
+            if settings.snapshot_mode_default in {"fast", "full"}
+            else "fast"
+        )
+        self._pending_mode: str = "full"
+        self._pending_action: str | None = None
+        self.last_perf: SnapshotPerf | None = None
+        self.perf_history: deque[SnapshotPerf] = deque(
+            maxlen=max(8, min(settings.perf_history_size, 2000))
+        )
+        self.last_ws_send_ms: float | None = None
+
     @staticmethod
     def new_id() -> str:
         return "sess_" + secrets.token_urlsafe(18)
@@ -205,11 +221,13 @@ class DebugSession:
             },
         }
 
-    def _snapshot_event(self, snapshot: Snapshot) -> dict:
+    def _snapshot_event(self, snapshot: Snapshot, payload: dict | None = None) -> dict:
         return {
             "type": "snapshot",
             "session_id": self.session_id,
-            "payload": snapshot.model_dump(mode="json"),
+            "payload": payload
+            if payload is not None
+            else snapshot.model_dump(mode="json"),
         }
 
     def _breakpoints_event(self) -> dict:
@@ -233,6 +251,37 @@ class DebugSession:
             except Exception:  # pragma: no cover - subscriber teardown race
                 self._subscribers.discard(queue)
 
+    async def _publish_snapshot(self, snapshot: Snapshot) -> None:
+        """Serialize once, measure it, then queue the event for subscribers.
+
+        ``serialize_ms`` covers the pydantic model dump plus the exact JSON byte
+        count; ``payload_bytes`` is the number of bytes the WebSocket layer will
+        send. Both are measured before broadcasting so they can travel with the
+        payload itself. The actual socket send time is recorded separately by the
+        WebSocket endpoint (``record_ws_send``) because it happens later.
+        """
+        perf = snapshot.perf
+        payload: dict = {}
+        if perf is not None:
+            started = monotonic_ms()
+            payload = snapshot.model_dump(mode="json")
+            encode_ms = monotonic_ms() - started
+            size_started = monotonic_ms()
+            payload_bytes = len(json.dumps(payload, separators=(",", ":")))
+            size_ms = monotonic_ms() - size_started
+            perf.serialize_ms = round(encode_ms + size_ms, 3)
+            perf.payload_bytes = payload_bytes
+            payload["perf"] = perf.model_dump(mode="json")
+        else:  # pragma: no cover - every snapshot is collected with a recorder
+            payload = snapshot.model_dump(mode="json")
+
+        broadcast_started = monotonic_ms()
+        self._broadcast(self._snapshot_event(snapshot, payload))
+        if perf is not None:
+            perf.broadcast_ms = round(monotonic_ms() - broadcast_started, 3)
+            self.last_perf = perf
+            self.perf_history.append(perf.model_copy(deep=True))
+
     async def _set_state(self, state: SessionState) -> None:
         self.state = state
         self.updated_at = utc_now_iso()
@@ -243,6 +292,22 @@ class DebugSession:
     async def _notify_snapshot(self) -> None:
         async with self._snapshot_condition:
             self._snapshot_condition.notify_all()
+
+    async def _release_collector(self) -> None:
+        """Delete cached GDB variable objects before the controller goes away."""
+        collector = self.collector
+        controller = self.controller
+        self.collector = None
+        if collector is None or controller is None:
+            return
+        try:
+            await collector.close(controller)
+        except Exception:
+            logger.warning(
+                "failed to release cached variable objects for %s",
+                self.session_id,
+                exc_info=True,
+            )
 
     async def _close_controller(self) -> None:
         controller = self.controller
@@ -263,7 +328,12 @@ class DebugSession:
         async with self._lock:
             if self.state is not SessionState.CREATED:
                 raise SessionStateError(
-                    f"Session is {self.state.value}; launch requires CREATED."
+                    f"Session is {self.state.value}; launch requires CREATED.",
+                    params={
+                        "state": self.state.value,
+                        "required": "CREATED",
+                        "action": "launch",
+                    },
                 )
             await self._set_state(SessionState.INITIALIZING)
             controller = MIController(self.settings)
@@ -299,6 +369,10 @@ class DebugSession:
                 )
                 epochs = controller.epochs()
                 seq_before = self._snapshot_seq
+                # The initial stop is a new frame and an unknown call stack:
+                # collect it fully. Every later step defaults to fast mode.
+                self._pending_mode = "full"
+                self._pending_action = "launch"
                 await controller.execute(
                     "-exec-run", timeout=self.settings.gdb_command_timeout_seconds
                 )
@@ -409,13 +483,17 @@ class DebugSession:
     async def launch_or_run(self) -> Snapshot | None:
         return await self.launch()
 
-    async def _step(self, command: str) -> tuple[SessionState, Snapshot | None]:
+    async def _step(
+        self, command: str, *, mode: str | None = None
+    ) -> tuple[SessionState, Snapshot | None]:
         self.touch()
         async with self._lock:
             self._require_stopped()
             controller = self._controller()
             epochs = controller.epochs()
             seq_before = self._snapshot_seq
+            self._pending_mode = self._resolve_mode(mode)
+            self._pending_action = command.removeprefix("-exec-").replace("-", "_")
             await self._set_state(SessionState.RUNNING)
             try:
                 await controller.execute(
@@ -473,12 +551,16 @@ class DebugSession:
             )
         return self.state, snapshot
 
-    async def continue_execution(self) -> tuple[SessionState, Snapshot | None]:
+    async def continue_execution(
+        self, *, mode: str | None = None
+    ) -> tuple[SessionState, Snapshot | None]:
         self.touch()
         async with self._lock:
             self._require_stopped()
             controller = self._controller()
             seq_before = self._snapshot_seq
+            self._pending_mode = self._resolve_mode(mode)
+            self._pending_action = "continue"
             await self._set_state(SessionState.RUNNING)
             try:
                 await controller.execute(
@@ -507,7 +589,12 @@ class DebugSession:
         async with self._lock:
             if self.state is not SessionState.RUNNING:
                 raise SessionStateError(
-                    f"Session is {self.state.value}; interrupt requires RUNNING."
+                    f"Session is {self.state.value}; interrupt requires RUNNING.",
+                    params={
+                        "state": self.state.value,
+                        "required": "RUNNING",
+                        "action": "interrupt",
+                    },
                 )
             controller = self._controller()
             try:
@@ -524,19 +611,99 @@ class DebugSession:
             return self.state, None
 
     async def action(
-        self, action: str
+        self, action: str, *, mode: str | None = None
     ) -> tuple[SessionState, Snapshot | None]:
         if action in {"launch", "run"}:
             snapshot = await self.launch()
             return self.state, snapshot
         if action == "continue":
-            return await self.continue_execution()
+            return await self.continue_execution(mode=mode)
         if action == "interrupt":
             return await self.interrupt()
         command = EXEC_COMMANDS.get(action)
         if command is None:
-            raise SessionStateError(f"Unsupported action {action!r}.")
-        return await self._step(command)
+            raise SessionStateError(
+                f"Unsupported action {action!r}.",
+                params={"action": action},
+            )
+        return await self._step(command, mode=mode)
+
+    def _resolve_mode(self, mode: str | None) -> str:
+        if mode in {"fast", "full"}:
+            return mode  # type: ignore[return-value]
+        return self.snapshot_mode_default
+
+    async def refresh(self, *, mode: str = "full") -> Snapshot:
+        """Re-collect the current stop, refreshing frames, disassembly, variables.
+
+        This is the user-triggered "refresh variables" path: it never executes
+        the inferior and never fabricates data: it just asks GDB to re-measure
+        the same stop with the full collector.
+        """
+        self.touch()
+        async with self._lock:
+            self._require_stopped()
+            controller = self._controller()
+            collector = self.collector
+            if collector is None:
+                raise SessionClosedError(
+                    "Session has no snapshot collector.",
+                    params={"reason": "no_collector"},
+                )
+            previous = self.snapshots[-1] if self.snapshots else None
+            snapshot_id = self._next_snapshot_id
+            snapshot = await collector.collect(
+                controller,
+                session_id=self.session_id,
+                snapshot_id=snapshot_id,
+                stop_reason=self.stop_reason,
+                previous=previous,
+                mode="full" if mode == "full" else "fast",
+                action="refresh",
+                force_variables=True,
+            )
+            if self._session_warnings:
+                snapshot.warnings = list(self._session_warnings) + snapshot.warnings
+            self.snapshots.append(snapshot)
+            self._last_snapshot = snapshot
+            self._next_snapshot_id += 1
+            self._snapshot_seq += 1
+            await self._publish_snapshot(snapshot)
+            await self._notify_snapshot()
+            return snapshot
+
+    def record_ws_send(self, duration_ms: float, payload_bytes: int | None = None) -> None:
+        """Called by the WebSocket endpoint after ``send_json`` returns."""
+        self.last_ws_send_ms = duration_ms
+        perf = self.last_perf
+        if perf is not None:
+            perf.ws_send_ms = round(duration_ms, 3)
+            if payload_bytes is not None:
+                perf.payload_bytes = payload_bytes
+
+    def perf_report(self) -> dict:
+        """Latest + aggregate performance facts for the debugger UI."""
+        history = list(self.perf_history)
+        totals = [perf.total_ms for perf in history]
+        commands = [float(perf.mi_command_count) for perf in history]
+        serialize = [
+            perf.serialize_ms for perf in history if perf.serialize_ms is not None
+        ]
+        ws_send = [perf.ws_send_ms for perf in history if perf.ws_send_ms is not None]
+        return {
+            "session_id": self.session_id,
+            "last": self.last_perf.model_dump(mode="json")
+            if self.last_perf is not None
+            else None,
+            "samples": len(history),
+            "aggregate": {
+                "total_ms": summarise_durations(totals),
+                "mi_command_count": summarise_durations(commands),
+                "serialize_ms": summarise_durations(serialize),
+                "ws_send_ms": summarise_durations(ws_send),
+            },
+            "recent": [perf.model_dump(mode="json") for perf in history[-20:]],
+        }
 
     # ------------------------------------------------------------------ events
     async def _event_loop(self) -> None:
@@ -627,6 +794,10 @@ class DebugSession:
             self.touch()
             previous = self.snapshots[-1] if self.snapshots else None
             snapshot_id = self._next_snapshot_id
+            mode = self._pending_mode
+            action = self._pending_action
+            self._pending_mode = self.snapshot_mode_default
+            self._pending_action = None
             try:
                 snapshot = await self.collector.collect(
                     self.controller,
@@ -634,6 +805,8 @@ class DebugSession:
                     snapshot_id=snapshot_id,
                     stop_reason=stop_event.reason,
                     previous=previous,
+                    mode=mode,
+                    action=action,
                 )
                 if self._session_warnings:
                     snapshot.warnings = list(self._session_warnings) + snapshot.warnings
@@ -641,7 +814,7 @@ class DebugSession:
                 self._last_snapshot = snapshot
                 self._next_snapshot_id += 1
                 self._snapshot_seq += 1
-                self._broadcast(self._snapshot_event(snapshot))
+                await self._publish_snapshot(snapshot)
             except Exception as exc:
                 self.last_error = (
                     f"Snapshot collection failed: {type(exc).__name__}: {exc}"
@@ -716,14 +889,21 @@ class DebugSession:
     def _require_stopped(self) -> None:
         if self.state is not SessionState.STOPPED:
             raise SessionStateError(
-                f"Session is {self.state.value}; this action requires STOPPED."
+                f"Session is {self.state.value}; this action requires STOPPED.",
+                params={"state": self.state.value, "required": "STOPPED"},
             )
         if self.controller is None or not self.controller.pid:
-            raise SessionClosedError("GDB process is not available.")
+            raise SessionClosedError(
+                "GDB process is not available.",
+                params={"reason": "gdb_unavailable"},
+            )
 
     def _controller(self) -> MIController:
         if self.controller is None:
-            raise SessionClosedError("Session has no GDB controller.")
+            raise SessionClosedError(
+                "Session has no GDB controller.",
+                params={"reason": "no_controller"},
+            )
         return self.controller
 
     async def terminate(self) -> None:
@@ -737,6 +917,7 @@ class DebugSession:
                 with contextlib.suppress(asyncio.CancelledError):
                     await self._pump_task
                 self._pump_task = None
+            await self._release_collector()
             await self._close_controller()
             self._broadcast(
                 {

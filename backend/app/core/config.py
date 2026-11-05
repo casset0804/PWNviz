@@ -74,6 +74,17 @@ def _env_int(names: tuple[str, ...], default: int) -> int:
         return default
 
 
+def _env_choice(
+    names: tuple[str, ...], default: str, allowed: tuple[str, ...]
+) -> str:
+    """Read a lowercase enumerated value, falling back to ``default``."""
+    raw = _first_env(*names)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    return value if value in allowed else default
+
+
 def _env_port(default: int = DEFAULT_API_PORT) -> int:
     """Parse ``API_PORT``/``PWNVIZ_PORT`` and ignore out-of-range values."""
     raw = _first_env("API_PORT", "PWNVIZ_PORT")
@@ -149,6 +160,14 @@ class Settings:
     memory_chunk_size: int = 0x40
     disassembly_before: int = 0x20
     disassembly_after: int = 0x40
+
+    # V1.1 performance knobs.
+    snapshot_mode_default: str = "fast"
+    memory_batch_max_bytes: int = 0x400
+    variable_cache_max_objects: int = 192
+    frame_refresh_interval_snapshots: int = 12
+    perf_history_size: int = 120
+    gdb_mi_settle_seconds: float = 0.01
 
     def describe(self) -> dict[str, object]:
         """Safe-to-log view of the settings (no secrets involved)."""
@@ -242,4 +261,20 @@ def get_settings() -> Settings:
         memory_chunk_size=_env_int(("PWNVIZ_MEMORY_CHUNK_SIZE",), 0x40),
         disassembly_before=_env_int(("PWNVIZ_DISASSEMBLY_BEFORE",), 0x20),
         disassembly_after=_env_int(("PWNVIZ_DISASSEMBLY_AFTER",), 0x40),
+        snapshot_mode_default=_env_choice(
+            ("PWNVIZ_SNAPSHOT_MODE",), "fast", ("fast", "full")
+        ),
+        memory_batch_max_bytes=_env_int(
+            ("PWNVIZ_MEMORY_BATCH_MAX_BYTES",), 0x400
+        ),
+        variable_cache_max_objects=_env_int(
+            ("PWNVIZ_VARIABLE_CACHE_MAX_OBJECTS",), 192
+        ),
+        frame_refresh_interval_snapshots=_env_int(
+            ("PWNVIZ_FRAME_REFRESH_INTERVAL",), 12
+        ),
+        perf_history_size=_env_int(("PWNVIZ_PERF_HISTORY_SIZE",), 120),
+        gdb_mi_settle_seconds=_env_float(
+            ("PWNVIZ_MI_SETTLE_SECONDS",), 0.01
+        ),
     )

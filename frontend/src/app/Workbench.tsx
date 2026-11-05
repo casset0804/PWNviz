@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 
 import { BottomDock } from "../components/BottomDock/BottomDock";
 import { PanelRail } from "../components/common/PanelRail";
@@ -12,6 +13,7 @@ import { useSamples } from "../hooks/useSamples";
 import { useDebugStore } from "../stores/debugStore";
 
 export function Workbench() {
+  const { t } = useTranslation(["panels", "errors", "common"]);
   const { data, error: capabilityError, loading, verifying, refresh } = useCapabilities();
   const { samples } = useSamples();
   const selectedSampleId = useDebugStore((state) => state.selectedSampleId);
@@ -51,7 +53,7 @@ export function Workbench() {
       {error ? (
         <div className="flex shrink-0 items-center gap-3 border-b border-rose-500/25 bg-rose-500/[0.07] px-3 py-1.5">
           <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-rose-300">
-            debugger error
+            {t("errors:title")}
           </span>
           <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-rose-100/70" title={error}>
             {error}
@@ -61,7 +63,7 @@ export function Workbench() {
             onClick={dismissError}
             className="border border-rose-500/25 px-1.5 py-0.5 font-mono text-[9px] text-rose-300 hover:border-rose-300/60"
           >
-            dismiss
+            {t("common:dismiss")}
           </button>
         </div>
       ) : null}
@@ -72,13 +74,21 @@ export function Workbench() {
         } ${rightPanelCollapsed ? "right-collapsed" : ""}`}
       >
         {leftPanelCollapsed ? (
-          <PanelRail label="Disassembly" side="left" onExpand={toggleLeftPanel} />
+          <PanelRail
+            label={t("panels:disassembly.title")}
+            side="left"
+            onExpand={toggleLeftPanel}
+          />
         ) : (
           <DisassemblyView onCollapse={toggleLeftPanel} />
         )}
         <StackMemoryView />
         {rightPanelCollapsed ? (
-          <PanelRail label="Registers" side="right" onExpand={toggleRightPanel} />
+          <PanelRail
+            label={t("panels:registers.title")}
+            side="right"
+            onExpand={toggleRightPanel}
+          />
         ) : (
           <RegisterPanel onCollapse={toggleRightPanel} />
         )}

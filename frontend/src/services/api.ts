@@ -1,8 +1,11 @@
+import { translate } from "../i18n";
 import type { Capabilities, SamplesResponse } from "../types/api";
 import type {
   ActionName,
   ActionResponse,
+  PerfReport,
   SessionInfo,
+  SnapshotMode,
   SnapshotsResponse,
 } from "../types/debug";
 
@@ -11,7 +14,11 @@ const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
 const WS_BASE = (import.meta.env.VITE_WS_BASE ?? "").replace(/\/$/, "");
 
 interface ErrorEnvelope {
-  error?: { code?: string; message?: string };
+  error?: {
+    code?: string;
+    message?: string;
+    params?: Record<string, unknown>;
+  };
 }
 
 interface RequestOptions {
@@ -23,12 +30,20 @@ interface RequestOptions {
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string | null;
+  /** Structured values from the backend's stable error ``code`` + ``params``. */
+  readonly params: Record<string, unknown>;
 
-  constructor(message: string, status: number, code: string | null) {
+  constructor(
+    message: string,
+    status: number,
+    code: string | null,
+    params: Record<string, unknown> = {},
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.params = params;
   }
 }
 
@@ -49,11 +64,12 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
+    const base = API_BASE || window.location.origin;
     throw new ApiError(
-      `Backend unreachable at ${API_BASE || window.location.origin} (${reason}). ` +
-        "Start it with scripts/dev_backend.sh inside WSL.",
+      translate("backendUnreachable", { base, reason }, "errors"),
       0,
       "backend_unreachable",
+      { base, reason },
     );
   }
 
@@ -65,9 +81,11 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       payload = null;
     }
     throw new ApiError(
-      payload?.error?.message ?? `Request failed with HTTP ${response.status}`,
+      payload?.error?.message ??
+        translate("requestFailed", { status: response.status }, "errors"),
       response.status,
       payload?.error?.code ?? null,
+      payload?.error?.params ?? {},
     );
   }
 
@@ -113,14 +131,35 @@ export function launchSession(sessionId: string): Promise<ActionResponse> {
 export function sendAction(
   sessionId: string,
   action: ActionName,
+  mode?: SnapshotMode | null,
 ): Promise<ActionResponse> {
   return request<ActionResponse>(
     `/api/v1/sessions/${encodeURIComponent(sessionId)}/actions`,
     {
       method: "POST",
-      body: { action },
+      body: mode ? { action, mode } : { action },
       timeoutMs: 60_000,
     },
+  );
+}
+
+/**
+ * Re-read the current stop (frames, disassembly, DWARF variables) without
+ * executing the inferior. Used by the "Refresh variables" button.
+ */
+export function refreshSession(
+  sessionId: string,
+  mode: SnapshotMode = "full",
+): Promise<ActionResponse> {
+  return request<ActionResponse>(
+    `/api/v1/sessions/${encodeURIComponent(sessionId)}/refresh`,
+    { method: "POST", body: { mode }, timeoutMs: 60_000 },
+  );
+}
+
+export function fetchPerformance(sessionId: string): Promise<PerfReport> {
+  return request<PerfReport>(
+    `/api/v1/sessions/${encodeURIComponent(sessionId)}/performance`,
   );
 }
 

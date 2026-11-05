@@ -1,0 +1,23 @@
+{
+  "title": "调试器错误",
+  "selectSampleFirst": "请先选择教学样例再启动。",
+  "terminateFailed": "终止失败：{{message}}",
+  "restartFailed": "重启失败：{{message}}",
+  "refreshFailed": "刷新失败：{{message}}",
+  "backendUnreachable": "无法连接后端 {{base}}（{{reason}}）。请在 WSL 中运行 scripts/dev_backend.sh 启动后端。",
+  "requestFailed": "请求失败：HTTP {{status}}",
+  "invalidRequest": "请求参数无效。",
+  "invalidSessionState": "会话状态为 {{state}}，此操作需要 {{required}}。",
+  "sessionClosed": "会话已关闭{{reasonSuffix}}。",
+  "tooManySessions": "活动调试会话过多（上限 {{maxActive}}）。",
+  "sampleNotFound": "找不到样例 {{sampleId}}。",
+  "sampleNotBuilt": "样例 {{sampleId}} 尚未编译。",
+  "debuggerUnavailable": "本机 GDB 不可用。",
+  "debuggerTimeout": "GDB 未在预期时间内响应：{{message}}",
+  "debuggerError": "调试器错误：{{message}}",
+  "crossSiteBlocked": "不允许跨站浏览器请求。",
+  "internalError": "后端内部错误。",
+  "sessionGone": "后端上已不存在该会话。",
+  "unknownProbe": "探测后端时发生未知错误。",
+  "listSamplesFailed": "获取样例列表失败。"
+}

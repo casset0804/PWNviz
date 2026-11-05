@@ -6,6 +6,7 @@ import contextlib
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.analysis.perf import monotonic_ms
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.sessions.manager import session_manager
@@ -31,13 +32,21 @@ async def session_stream(websocket: WebSocket, session_id: str) -> None:
 
     await websocket.accept()
     queue = session.subscribe()
+
+    async def send(event: dict) -> None:
+        started = monotonic_ms()
+        await websocket.send_json(event)
+        if event.get("type") == "snapshot":
+            # Real socket send cost, measured where it actually happens.
+            session.record_ws_send(monotonic_ms() - started)
+
     try:
         for event in session.initial_events():
-            await websocket.send_json(event)
+            await send(event)
 
         while True:
             event = await queue.get()
-            await websocket.send_json(event)
+            await send(event)
             if event.get("type") == "session.terminated":
                 break
     except WebSocketDisconnect:

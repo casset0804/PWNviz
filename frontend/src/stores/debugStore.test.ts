@@ -9,6 +9,7 @@ vi.mock("../services/api", async (importOriginal) => {
 });
 
 import { deleteSession } from "../services/api";
+import { translate } from "../i18n";
 import type { SessionInfo, VariableNode } from "../types/debug";
 import { useDebugStore } from "./debugStore";
 const session: SessionInfo = {
@@ -54,7 +55,11 @@ describe("debugStore terminate", () => {  beforeEach(() => {
     const state = useDebugStore.getState();
     expect(state.session?.session_id).toBe(session.session_id);
     expect(state.busy).toBe(false);
-    expect(state.error).toContain("terminate failed");
+    // The wrapper is localized but the original backend error is preserved.
+    expect(state.error).toBe(
+      translate("terminateFailed", { message: "backend offline" }, "errors"),
+    );
+    expect(state.error).toContain("backend offline");
     expect(state.log.at(-1)?.level).toBe("error");
   });
 

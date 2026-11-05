@@ -2,7 +2,8 @@
 
 每一阶段结束时项目必须仍可启动。当前仓库状态：**Phase 0/1/2/3 已完成，Phase 4
 变量语义已完成核心部分（DWARF locals/参数、array/struct/pointer/string、
-optimized-out、bounded pointer target）**；源码视图与更深层容器语义待后续。
+optimized-out、bounded pointer target），Phase 5（V1.1）性能与中英双语已完成**；
+安全隔离（容器/多用户）与源码视图仍待后续。
 
 ## Phase 0：环境探测与骨架
 
@@ -149,6 +150,46 @@ optimized-out、bounded pointer target）**；源码视图与更深层容器语�
 - ROP 链展示；
 - 课程任务与挑战。
 
+## Phase 5（V1.1）：性能与中英双语（已完成）
+
+目标：把「真实单步 → 真实栈变化」做得**又快又双语**，且不牺牲数据真实性。
+
+| # | 工作项 | 状态 | 证据 |
+|---|---|---|---|
+| 5.1 | 单调时钟性能基线（脚本 + 100 步） | 完成 | `scripts/benchmark_stepping.py`、`docs/benchmarks/baseline.json` |
+| 5.2 | `PerfStats`：阶段耗时、MI 计数、payload 字节、序列化/发送耗时 | 完成 | `app/analysis/perf.py`、`Snapshot.perf` |
+| 5.3 | 栈窗口单条批量读取 + 失败分块回退 + 部分抢救 | 完成 | `collector/memory.py`、`tests/unit/test_memory_batch.py` |
+| 5.4 | Fast / Full 两级快照（默认 Fast，launch/刷新 Full） | 完成 | `collector/snapshot.py`、`session.py` |
+| 5.5 | 变量对象缓存 + `-var-update` 增量刷新 + 帧变化重建 + 清理 | 完成 | `collector/variables.py` |
+| 5.6 | 反汇编窗口缓存（含指令字节与快照版本） | 完成 | `collector/disassembly.py` |
+| 5.7 | 帧刷新策略（证据驱动，不使用 RBP） | 完成 | `collector/frames.py` |
+| 5.8 | 主动刷新接口 `POST /refresh` 与性能接口 `GET /performance` | 完成 | `api/routes_sessions.py` |
+| 5.9 | MI settle 可配置（默认 0.01s），隔离命令数与单命令延迟 | 完成 | `gdb_process.py`、`docs/PERFORMANCE.md §2.1` |
+| 5.10 | React：memo、行模型、selectors、虚拟化阈值、Profiler | 完成 | `StackMemoryView.tsx`、`lib/renderPerf.ts`、`lib/virtualWindow.ts` |
+| 5.11 | 单步去掉多余 REST 往返 | 完成 | `stores/debugStore.ts` |
+| 5.12 | i18next + react-i18next，默认 zh-CN，7 命名空间 × 2 语言 | 完成 | `frontend/src/i18n/`、`docs/I18N.md` |
+| 5.13 | 全 UI 翻译（含空状态、tooltip、aria-label、错误） | 完成 | 组件与 `i18n.test.ts` |
+| 5.14 | 后端错误 code + params，前端本地化；GDB 原文保留 | 完成 | `core/errors.py`、`debugStore.errorMessage` |
+| 5.15 | 真实 E2E 覆盖中英切换与持久化 | 完成 | `scripts/ui_smoke.mjs` |
+| 5.16 | 前端渲染性能脚本（100 次真实单步） | 完成 | `scripts/perf_frontend.mjs`、`docs/benchmarks/frontend*.json` |
+
+性能验收（真实 GDB 12.1、`stack-basic`、100 步）：
+
+- [x] 单步 p50 从 2630.51 ms 降到 45.84 ms（57.4×），同 settle 下 406.59 ms（6.5×）；
+- [x] 单步 MI 命令数 p50 从 26 降到 4；mean 25.52 → 5.44；
+- [x] 栈读取命令 9.00 → 1.12/步；变量命令 12.52 → 2.08/步；
+- [x] 前端 React commit 2.22 → 1.04/快照；StackMemoryView p50 5.3 → 0.3 ms；
+- [x] 连续 100 次更新时 100% 内存行 DOM 复用，选中地址保持；
+- [x] 全部旧测试保留并通过；新增按阶段/缓存/批量/回退/双语测试。
+
+功能验收：
+
+- [x] 默认简体中文，`pwnviz.locale` 持久化，页面无刷新切换；
+- [x] 英文界面完整，技术标识符（寄存器/指令/变量/地址/字节）不翻译；
+- [x] Fast 快照不使用 mock、零填充或未标注的旧值；
+- [x] 真实 GDB 链路未改：仍是一个持久 GDB/MI3 进程、单 reader、token 关联；
+- [x] 现有 REST/WS 协议兼容（新增字段全部可选，新增端点独立）。
+
 ## 风险与对策
 
 | 风险 | 对策 |
@@ -156,6 +197,10 @@ optimized-out、bounded pointer target）**；源码视图与更深层容器语�
 | pwndbg 在 MI 模式下输出噪声 | 只把 console 流当辅助文本，核心数据走 MI |
 | MI 命令与异步事件错配 | 单 reader + 命令队列 + 明确等待 stopped |
 | 快速连点 | 后端串行 + 前端按钮禁用 + 请求 ID |
-| 内存读取跨越不可读页 | 分块读取，unreadable 标记 |
+| 内存读取跨越不可读页 | 批量优先，失败自动分块，unreadable 明确标记 |
 | 无帧指针二进制 | RBP 只作寄存器；栈帧来自 GDB unwinder |
 | 把未知数据当返回地址 | 语义标注必须有证据，否则只显示原始字节 |
+| 缓存显示旧值冒充当前值 | `variables_state`/`frames_state` 显式标注；变量用 `-var-update` 刷当前值 |
+| 变量对象无限累积 | 对象预算 + 帧变化/会话结束删除 + 刷新失败重建 |
+| 反汇编缓存越界使用 | 仅 RIP 在窗口内且是已知指令边界才命中 |
+| 性能优化悄悄减少数据 | `perf` 随快照发布；benchmark 与测试同时断言真实数据 |

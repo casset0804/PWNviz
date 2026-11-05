@@ -1,0 +1,26 @@
+{
+  "language": "Interface language",
+  "languageTitle": "Switch the interface language without reloading; the choice is stored locally",
+  "animations": "Diff animation",
+  "perf": "Performance",
+  "perfTitle": "Show the latest snapshot cost and GDB/MI command count",
+  "mode": "Snapshot mode",
+  "modeFast": "Fast snapshot",
+  "modeFull": "Full snapshot",
+  "stages": {
+    "registers": "registers",
+    "frames": "frames",
+    "disassembly": "disassembly",
+    "memory": "memory",
+    "variables": "variables",
+    "diff": "diff",
+    "serialize": "serialize"
+  },
+  "sources": {
+    "gdb": "GDB",
+    "cache": "cache",
+    "none": "none"
+  },
+  "refreshVariables": "Refresh variables",
+  "refreshVariablesTitle": "Ask GDB to re-read the current frame's DWARF variables (does not execute)"
+}

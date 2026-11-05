@@ -46,12 +46,17 @@ async def test_variable_name_injection_is_skipped_not_forwarded() -> None:
     controller = RecordingController()
     collector = VariableCollector(get_settings())
 
-    roots, available, warnings = await collector.collect(
+    result = await collector.collect(
         controller,  # type: ignore[arg-type]
+        mode="full",
         has_debug_file=True,
+        frame_key=None,
     )
 
-    assert roots == []
-    assert available is True
-    assert warnings
-    assert all("\n" not in command and "\r" not in command for command in controller.commands)
+    assert result.nodes == []
+    assert result.available is True
+    assert result.warnings
+    assert all(
+        "\n" not in command and "\r" not in command
+        for command in controller.commands
+    )

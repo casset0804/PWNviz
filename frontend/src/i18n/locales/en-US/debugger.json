@@ -1,0 +1,43 @@
+{
+  "state": {
+    "idle": "Idle",
+    "created": "Created",
+    "initializing": "Initializing",
+    "ready": "Ready",
+    "running": "Running",
+    "stopped": "Stopped",
+    "exited": "Exited",
+    "error": "Error",
+    "terminated": "Terminated",
+    "working": "working…",
+    "action": "action",
+    "stop": "stop",
+    "rip": "rip",
+    "snap": "snap",
+    "stream": "stream",
+    "gdb": "gdb",
+    "inferior": "inf",
+    "breakpoint": "bp {{number}} @ {{address}}",
+    "breakpoints": "{{count}} breakpoints",
+    "debugState": "state: {{state}}",
+    "stopSuffix": " · stop: {{reason}}",
+    "snapshotCount": "snapshots {{count}}",
+    "perfTitle": "Latest snapshot ({{mode}}): {{total}} ms total, {{commands}} GDB/MI commands, {{bytes}} bytes\nregisters {{registers}} / frames {{frames}} / disassembly {{disassembly}} / memory {{memory}} / variables {{variables}} / diff {{diff}} ms\nserialize {{serialize}} ms · WebSocket send {{ws}} ms",
+    "perfSummary": "{{total}} ms · {{commands}} MI",
+    "perfModeFast": "fast",
+    "perfModeFull": "full"
+  },
+  "log": {
+    "creating": "creating session for {{sampleId}}",
+    "launching": "launching {{sessionId}}",
+    "attached": "attached to {{sessionId}}",
+    "action": "action {{action}}",
+    "state": "session.state {{state}}",
+    "terminated": "session terminated",
+    "restarting": "restarting session",
+    "variablesRefreshed": "variables refreshed (full snapshot)",
+    "breakpoints": "breakpoints.updated ({{count}})",
+    "streamUnavailable": "live stream unavailable after 5 reconnect attempts",
+    "sessionGone": "session no longer exists on the backend (restarted?)"
+  }
+}

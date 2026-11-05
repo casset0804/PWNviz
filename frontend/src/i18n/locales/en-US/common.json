@@ -1,0 +1,31 @@
+{
+  "app": {
+    "name": "PWNviz",
+    "subtitle": "memory debug studio",
+    "title": "PWNviz real GDB memory debug teaching studio"
+  },
+  "collapse": "Collapse {{title}}",
+  "expand": "Expand {{title}}",
+  "collapsed": "{{label}} collapsed",
+  "changed": "changed",
+  "unknown": "unknown",
+  "unreadable": "unreadable",
+  "none": "none",
+  "dismiss": "dismiss",
+  "refresh": "refresh",
+  "reload": "reload",
+  "noSnapshot": "no snapshot",
+  "stale": "cached",
+  "fresh": "fresh",
+  "deferred": "deferred",
+  "rowCount": "{{count}} rows",
+  "byteCount": "{{count}} bytes",
+  "noData": "no values",
+  "language": {
+    "label": "Language",
+    "current": "Current language: {{language}}",
+    "switchTo": "Switch to {{language}}",
+    "zh": "简体中文",
+    "en": "English"
+  }
+}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { translate } from "../i18n";
 import { ApiError, fetchSamples } from "../services/api";
 import type { SampleInfo } from "../types/api";
 
@@ -32,7 +33,7 @@ export function useSamples(): UseSamplesResult {
             ? cause.message
             : cause instanceof Error
               ? cause.message
-              : "Failed to list samples",
+              : translate("listSamplesFailed", {}, "errors"),
         );
       } finally {
         if (mounted.current) setLoading(false);

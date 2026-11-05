@@ -1,5 +1,8 @@
+import { useTranslation } from "react-i18next";
+
 import type { SampleInfo } from "../../types/api";
 import { useDebugStore } from "../../stores/debugStore";
+import { LanguageSwitch } from "../common/LanguageSwitch";
 
 type ConnectionState = "checking" | "online" | "offline";
 
@@ -8,12 +11,6 @@ interface ToolbarProps {
   connection: ConnectionState;
   ready: boolean;
 }
-
-const CONNECTION_LABEL: Record<ConnectionState, string> = {
-  checking: "probing",
-  online: "backend",
-  offline: "offline",
-};
 
 function connectionColor(connection: ConnectionState): string {
   if (connection === "online") return "bg-emerald-400";
@@ -92,6 +89,7 @@ function LayoutToggle({
 }
 
 export function Toolbar({ samples, connection, ready }: ToolbarProps) {
+  const { t } = useTranslation(["toolbar", "common"]);
   const selectedSampleId = useDebugStore((state) => state.selectedSampleId);
   const setSelectedSampleId = useDebugStore((state) => state.setSelectedSampleId);
   const session = useDebugStore((state) => state.session);
@@ -122,6 +120,13 @@ export function Toolbar({ samples, connection, ready }: ToolbarProps) {
   const canPause = debuggerState === "RUNNING" && Boolean(session) && !busy;
   const canStep = debuggerState === "STOPPED" && Boolean(session) && !busy;
 
+  const connectionLabel =
+    connection === "online"
+      ? t("toolbar:connectionOnline")
+      : connection === "checking"
+        ? t("toolbar:connectionChecking")
+        : t("toolbar:connectionOffline");
+
   return (
     <header
       className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b border-[#1a2431] bg-[#090e15] px-3"
@@ -135,9 +140,11 @@ export function Toolbar({ samples, connection, ready }: ToolbarProps) {
           P
         </span>
         <div className="leading-none">
-          <div className="text-[13px] font-semibold tracking-[0.08em] text-[#dbe6f2]">PWNviz</div>
+          <div className="text-[13px] font-semibold tracking-[0.08em] text-[#dbe6f2]">
+            {t("common:app.name")}
+          </div>
           <div className="mt-1 hidden text-[8px] uppercase tracking-[0.22em] text-[#55657a] xl:block">
-            memory debug studio
+            {t("common:app.subtitle")}
           </div>
         </div>
       </div>
@@ -145,18 +152,22 @@ export function Toolbar({ samples, connection, ready }: ToolbarProps) {
       <div className="mx-1 h-6 w-px shrink-0 bg-[#1d2938]" aria-hidden="true" />
 
       <label className="flex shrink-0 items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-[#5d6e82]">
-        <span>target</span>
+        <span>{t("toolbar:target")}</span>
         <select
           value={selectedSampleId ?? ""}
           onChange={(event) => setSelectedSampleId(event.target.value)}
           disabled={Boolean(session) || samples.length === 0}
+          aria-label={t("toolbar:target")}
+          data-testid="sample-select"
           className="h-6 w-[9.5rem] border border-[#253346] bg-[#0d141d] px-1.5 font-mono text-[10px] normal-case tracking-normal text-[#d0dbe7] disabled:opacity-50"
         >
-          {samples.length === 0 ? <option value="">no samples</option> : null}
+          {samples.length === 0 ? (
+            <option value="">{t("toolbar:noSamples")}</option>
+          ) : null}
           {samples.map((sample) => (
             <option key={sample.id} value={sample.id}>
               {sample.id}
-              {sample.binary_exists ? "" : " (not built)"}
+              {sample.binary_exists ? "" : t("toolbar:notBuilt")}
             </option>
           ))}
         </select>
@@ -166,111 +177,122 @@ export function Toolbar({ samples, connection, ready }: ToolbarProps) {
 
       <div className="flex shrink-0 items-center gap-1">
         <ActionButton
-          label="Run"
+          label={t("toolbar:run")}
           testId="run-session"
           emphasis
           disabled={session ? !canLaunchExisting : !canStart}
           onClick={() => {
             void (session ? launchExisting() : startSession());
           }}
-          title={session ? "Launch the created session" : "Create a session and run to main"}
+          title={
+            session ? t("toolbar:runExistingTitle") : t("toolbar:runTitle")
+          }
         />
         <ActionButton
-          label="Continue"
+          label={t("toolbar:continue")}
           testId="continue"
           disabled={!canContinue}
           onClick={() => void continueExecution()}
-          title="Continue (c)"
+          title={t("toolbar:continueTitle")}
         />
         <ActionButton
-          label="Pause"
+          label={t("toolbar:pause")}
           testId="pause"
           disabled={!canPause}
           onClick={() => void pause()}
-          title="Interrupt the inferior (p)"
+          title={t("toolbar:pauseTitle")}
         />
         <ToolbarSeparator />
         <ActionButton
-          label="StepI"
+          label={t("toolbar:stepInstruction")}
           testId="step-instruction"
           emphasis
           disabled={!canStep}
           onClick={() => void stepInstruction()}
-          title="Step one machine instruction (s)"
+          title={t("toolbar:stepInstructionTitle")}
         />
         <ActionButton
-          label="NextI"
+          label={t("toolbar:nextInstruction")}
           testId="next-instruction"
           disabled={!canStep}
           onClick={() => void nextInstruction()}
-          title="Execute one instruction, stepping over calls (n)"
+          title={t("toolbar:nextInstructionTitle")}
         />
         <ToolbarSeparator />
         <ActionButton
-          label="Step Into"
+          label={t("toolbar:stepInto")}
           testId="step-into"
           disabled={!canStep}
           onClick={() => void stepSource()}
-          title="Source-level step into calls (i)"
+          title={t("toolbar:stepIntoTitle")}
         />
         <ActionButton
-          label="Step Over"
+          label={t("toolbar:stepOver")}
           testId="step-over"
           disabled={!canStep}
           onClick={() => void nextSource()}
-          title="Source-level step over calls (o)"
+          title={t("toolbar:stepOverTitle")}
         />
         <ToolbarSeparator />
         <ActionButton
-          label="Finish"
+          label={t("toolbar:finish")}
           testId="finish"
           disabled={!canStep}
           onClick={() => void finish()}
-          title="Run until the current frame returns (f)"
+          title={t("toolbar:finishTitle")}
         />
         <ToolbarSeparator />
         <ActionButton
-          label="Restart"
+          label={t("toolbar:restart")}
           testId="restart"
           disabled={!session || busy}
           onClick={() => void restartSession()}
-          title="Delete and recreate a fresh session at main"
+          title={t("toolbar:restartTitle")}
         />
         <ActionButton
-          label="Terminate"
+          label={t("toolbar:terminate")}
           testId="terminate"
           disabled={!session || busy}
           onClick={() => void terminate()}
-          title="Terminate the inferior and release GDB"
+          title={t("toolbar:terminateTitle")}
         />
       </div>
 
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        <LanguageSwitch />
         <span
           className="flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[#5d6e82]"
-          title={CONNECTION_LABEL[connection]}
+          title={connectionLabel}
         >
           <span className={`h-1.5 w-1.5 ${connectionColor(connection)}`} aria-hidden="true" />
-          <span className="hidden 2xl:inline">{CONNECTION_LABEL[connection]}</span>
+          <span className="hidden 2xl:inline">{connectionLabel}</span>
         </span>
         <span className="mx-1 hidden h-6 w-px bg-[#1d2938] 2xl:block" aria-hidden="true" />
         <LayoutToggle
           active={!leftPanelCollapsed}
-          label="Disasm"
+          label={t("toolbar:disasmLabel")}
           testId="toggle-disasm"
-          title={leftPanelCollapsed ? "Show disassembly panel" : "Collapse disassembly panel"}
+          title={
+            leftPanelCollapsed
+              ? t("toolbar:showDisasm")
+              : t("toolbar:hideDisasm")
+          }
           onClick={toggleLeftPanel}
         />
         <LayoutToggle
           active={!rightPanelCollapsed}
-          label="Regs"
+          label={t("toolbar:regsLabel")}
           testId="toggle-registers"
-          title={rightPanelCollapsed ? "Show register panel" : "Collapse register panel"}
+          title={
+            rightPanelCollapsed
+              ? t("toolbar:showRegs")
+              : t("toolbar:hideRegs")
+          }
           onClick={toggleRightPanel}
         />
         <label
           className="flex h-6 items-center gap-1.5 border border-[#253346] bg-[#0b1017] px-1.5 font-mono text-[9px] uppercase tracking-[0.08em] text-[#6b7c90]"
-          title="Animate changed stack bytes (disabled automatically by reduce-motion)"
+          title={t("toolbar:animationsTitle")}
         >
           <input
             type="checkbox"
@@ -278,8 +300,9 @@ export function Toolbar({ samples, connection, ready }: ToolbarProps) {
             onChange={toggleAnimations}
             className="h-3 w-3 accent-emerald-500"
             data-testid="animation-toggle"
+            aria-label={t("toolbar:animations")}
           />
-          diff fx
+          {t("toolbar:animations")}
         </label>
       </div>
     </header>

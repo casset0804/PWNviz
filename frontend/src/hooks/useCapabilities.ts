@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { translate } from "../i18n";
 import { ApiError, fetchCapabilities } from "../services/api";
 import type { Capabilities } from "../types/api";
 
@@ -39,7 +40,7 @@ export function useCapabilities(): UseCapabilitiesResult {
           ? cause.message
           : cause instanceof Error
             ? cause.message
-            : "Unknown error while probing the backend";
+            : translate("unknownProbe", {}, "errors");
       setError(message);
     } finally {
       if (mounted.current) {

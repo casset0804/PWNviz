@@ -1,13 +1,14 @@
 import { create } from "zustand";
 
+import { translate } from "../i18n";
 import * as api from "../services/api";
 import { ApiError } from "../services/api";
 import type {
   ActionName,
   Breakpoint,
   DebuggerState,
-  SessionInfo,
   Snapshot,
+  SessionInfo,
   StreamEvent,
   VariableNode,
 } from "../types/debug";
@@ -93,6 +94,8 @@ interface DebugStore {
   finish: () => Promise<void>;
   restartSession: () => Promise<void>;
   terminate: () => Promise<void>;
+  /** Re-read DWARF variables for the current stop without executing. */
+  refreshVariables: () => Promise<void>;
 }
 
 const KNOWN_STATES: ReadonlySet<string> = new Set([
@@ -130,8 +133,41 @@ function reconcileState(
   return next;
 }
 
+/** Stable backend error codes -> localized message keys (errors namespace). */
+const ERROR_CODE_KEYS: Record<string, string> = {
+  backend_unreachable: "backendUnreachable",
+  invalid_request: "invalidRequest",
+  invalid_session_state: "invalidSessionState",
+  session_closed: "sessionClosed",
+  too_many_sessions: "tooManySessions",
+  sample_not_found: "sampleNotFound",
+  sample_not_built: "sampleNotBuilt",
+  debugger_unavailable: "debuggerUnavailable",
+  debugger_timeout: "debuggerTimeout",
+  debugger_error: "debuggerError",
+  cross_site_blocked: "crossSiteBlocked",
+  internal_error: "internalError",
+};
+
+function apiErrorParams(error: ApiError): Record<string, unknown> {
+  const params = error.params ?? {};
+  const reason = typeof params.reason === "string" ? params.reason : "";
+  return {
+    ...params,
+    maxActive: params.max_active,
+    sampleId: params.sample_id,
+    reasonSuffix: reason ? ` (${reason})` : "",
+    message: error.message,
+  };
+}
+
 function errorMessage(error: unknown): string {
-  if (error instanceof ApiError) return error.message;
+  if (error instanceof ApiError) {
+    const key = error.code ? ERROR_CODE_KEYS[error.code] : undefined;
+    // Raw GDB text stays inside {{message}}; we never drop the underlying detail.
+    if (key) return translate(key, apiErrorParams(error), "errors");
+    return error.message;
+  }
   if (error instanceof Error) return error.message;
   return String(error);
 }
@@ -280,12 +316,12 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
     if (get().busy || get().session) return;
     const sampleId = get().selectedSampleId;
     if (!sampleId) {
-      set({ error: "Select a teaching sample before launching." });
+      set({ error: translate("selectSampleFirst", {}, "errors") });
       return;
     }
 
     set({ busy: true, error: null, bottomTab: "memory" });
-    get().appendLog("info", `creating session for ${sampleId}`);
+    get().appendLog("info", translate("log.creating", { sampleId }, "debugger"));
     closeStream(true);
     try {
       const session = await api.createSession({ sample_id: sampleId });
@@ -306,7 +342,10 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
       window.history.replaceState(null, "", `?sessionId=${encodeURIComponent(session.session_id)}`);
       openStream(session.session_id, true);
 
-      get().appendLog("info", `launching ${session.session_id}`);
+      get().appendLog(
+        "info",
+        translate("log.launching", { sessionId: session.session_id }, "debugger"),
+      );
       const launched = await api.launchSession(session.session_id);
       applyActionResponse(launched);
       const info = await api.fetchSession(session.session_id).catch(() => null);
@@ -390,7 +429,7 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
         `?sessionId=${encodeURIComponent(sessionId)}`,
       );
       openStream(sessionId, true);
-      get().appendLog("info", `attached to ${sessionId}`);
+      get().appendLog("info", translate("log.attached", { sessionId }, "debugger"));
     } catch (error) {
       set({ error: errorMessage(error), session: null, debuggerState: "IDLE" });
       get().appendLog("error", errorMessage(error));
@@ -413,12 +452,16 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
     if (!session || get().busy) return;
     const sampleId = session.sample_id || get().selectedSampleId;
     set({ busy: true, error: null });
-    get().appendLog("info", "restarting session");
+    get().appendLog("info", translate("log.restarting", {}, "debugger"));
     try {
       await api.deleteSession(session.session_id);
     } catch (error) {
       if (!(error instanceof ApiError && error.status === 404)) {
-        const message = `restart failed: ${errorMessage(error)}`;
+        const message = translate(
+          "restartFailed",
+          { message: errorMessage(error) },
+          "errors",
+        );
         set({ error: message, busy: false });
         get().appendLog("error", message);
         // Keep the old session; never start a second GDB while DELETE is
@@ -462,7 +505,11 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
       if (error instanceof ApiError && error.status === 404) {
         // Already gone on the backend; fall through and clear local state.
       } else {
-        const message = `terminate failed: ${errorMessage(error)}`;
+        const message = translate(
+          "terminateFailed",
+          { message: errorMessage(error) },
+          "errors",
+        );
         set({ error: message, busy: false });
         get().appendLog("error", message);
         // Keep the session and WebSocket so the user can retry DELETE. Clearing
@@ -491,7 +538,36 @@ export const useDebugStore = create<DebugStore>()((set, get) => ({
       bottomTab: "environment",
     });
     window.history.replaceState(null, "", window.location.pathname);
-    get().appendLog("info", "session terminated");
+    get().appendLog("info", translate("log.terminated", {}, "debugger"));
+  },
+
+  refreshVariables: async () => {
+    const session = get().session;
+    if (!session || get().busy) return;
+    if (get().debuggerState !== "STOPPED") return;
+    set({ busy: true, error: null });
+    try {
+      // Re-reads frames, disassembly and DWARF variables for the same stop.
+      // The backend never executes the inferior for this request.
+      const response = await api.refreshSession(session.session_id, "full");
+      applyActionResponse(response);
+      // A refresh is not a step: never attribute the previous instruction to it.
+      useDebugStore.setState({ lastAction: null });
+      get().appendLog(
+        "event",
+        translate("log.variablesRefreshed", {}, "debugger"),
+      );
+    } catch (error) {
+      const message = translate(
+        "refreshFailed",
+        { message: errorMessage(error) },
+        "errors",
+      );
+      set({ error: message });
+      get().appendLog("error", message);
+    } finally {
+      set({ busy: false });
+    }
   },
 }));
 
@@ -500,22 +576,13 @@ async function runAction(action: ActionName): Promise<void> {
   if (!current.session || current.busy) return;
 
   useDebugStore.setState({ busy: true, error: null, lastAction: action });
-  current.appendLog("info", `action ${action}`);
+  current.appendLog("info", translate("log.action", { action }, "debugger"));
   try {
+    // The action response already carries the new state and (for steps) the
+    // snapshot. A second GET /sessions/{id} per step doubled step latency for
+    // no new information, so it is deliberately not issued here.
     const response = await api.sendAction(current.session.session_id, action);
     applyActionResponse(response);
-    const info = await api.fetchSession(current.session.session_id).catch(() => null);
-    const state = useDebugStore.getState();
-    if (info && state.session?.session_id === current.session.session_id) {
-      const effective = reconcileState(
-        state.debuggerState,
-        normalizeState(info.state),
-      );
-      useDebugStore.setState({
-        session: { ...info, state: effective },
-        debuggerState: effective,
-      });
-    }
   } catch (error) {
     const message = errorMessage(error);
     useDebugStore.setState({ error: message });
@@ -657,7 +724,7 @@ function handleStreamMessage(sessionId: string, raw: string): void {
     }
     useDebugStore
       .getState()
-      .appendLog("event", `session.state ${nextState}`);
+      .appendLog("event", translate("log.state", { state: nextState }, "debugger"));
     return;
   }
 
@@ -683,7 +750,10 @@ function handleStreamMessage(sessionId: string, raw: string): void {
     useDebugStore.setState({ breakpoints });
     useDebugStore
       .getState()
-      .appendLog("event", `breakpoints.updated (${breakpoints.length})`);
+      .appendLog(
+        "event",
+        translate("log.breakpoints", { count: breakpoints.length }, "debugger"),
+      );
     return;
   }
 
@@ -703,7 +773,9 @@ function handleStreamMessage(sessionId: string, raw: string): void {
         ? { ...state.session, state: "TERMINATED" }
         : state.session,
     }));
-    useDebugStore.getState().appendLog("event", "session.terminated");
+    useDebugStore
+      .getState()
+      .appendLog("event", translate("log.terminated", {}, "debugger"));
   }
 }
 
@@ -741,7 +813,7 @@ function openStream(sessionId: string, resetAttempts = false): void {
     }
     const current = useDebugStore.getState();
     if (event.code === 4404) {
-      const message = "session no longer exists on the backend (restarted?)";
+      const message = translate("log.sessionGone", {}, "debugger");
       useDebugStore.setState((state) => ({
         streamStatus: "closed",
         debuggerState: "ERROR",
@@ -774,7 +846,7 @@ function scheduleReconnect(sessionId: string): void {
     useDebugStore.setState({ streamStatus: "closed" });
     useDebugStore
       .getState()
-      .appendLog("error", "live stream unavailable after 5 reconnect attempts");
+      .appendLog("error", translate("log.streamUnavailable", {}, "debugger"));
     return;
   }
   reconnectAttempts += 1;

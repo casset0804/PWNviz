@@ -1,7 +1,17 @@
-import { useDebugStore } from "../../stores/debugStore";
+import { useTranslation } from "react-i18next";
+
+import { useDebugStore, type LogLevel } from "../../stores/debugStore";
 import { StatusBadge } from "../common/StatusBadge";
 
+const LEVEL_KEYS: Record<LogLevel, string> = {
+  info: "panels:log.levelInfo",
+  event: "panels:log.levelEvent",
+  error: "panels:log.levelError",
+  gdb: "panels:log.levelGdb",
+};
+
 export function DebugLogPanel() {
+  const { t } = useTranslation(["panels", "common"]);
   const log = useDebugStore((state) => state.log);
   const session = useDebugStore((state) => state.session);
   const streamStatus = useDebugStore((state) => state.streamStatus);
@@ -13,16 +23,16 @@ export function DebugLogPanel() {
           {streamStatus}
         </StatusBadge>
         <span className="font-mono text-[10px] text-slate-600">
-          {session ? session.session_id : "no session"}
+          {session ? session.session_id : t("panels:log.noSession")}
         </span>
         <span className="ml-auto font-mono text-[10px] text-slate-600">
-          {log.length} entries
+          {t("panels:log.entries", { count: log.length })}
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-2" data-testid="debug-log-panel">
         {log.length === 0 ? (
           <p className="p-2 font-mono text-[10px] text-slate-600">
-            No session events yet. Create a session to see debugger events here.
+            {t("panels:log.empty")}
           </p>
         ) : (
           <ul className="space-y-0.5 font-mono text-[10px]">
@@ -48,7 +58,7 @@ export function DebugLogPanel() {
                             : "text-slate-600"
                     }`}
                   >
-                    {entry.level}
+                    {t(LEVEL_KEYS[entry.level])}
                   </span>
                   <span className="min-w-0 break-all text-slate-400">{entry.message}</span>
                 </li>

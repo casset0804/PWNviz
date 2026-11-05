@@ -68,6 +68,10 @@ async def test_partially_readable_window_keeps_known_bytes(make_settings) -> Non
         stack_window_below=8,
         stack_window_above=8,
         memory_chunk_size=8,
+        # Force the batch request to be chunk-sized so the second request fails
+        # exactly as it did before batched reads existed. Batched reads
+        # themselves are covered by tests/unit/test_memory_batch.py.
+        memory_batch_max_bytes=8,
         max_stack_read_bytes=0x40,
     )
     collector = StackMemoryCollector(settings)

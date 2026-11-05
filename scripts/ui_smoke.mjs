@@ -23,6 +23,9 @@ const APP_URL = process.env.PWNVIZ_APP_URL ?? "http://127.0.0.1:5173";
 const API_URL = (process.env.PWNVIZ_API_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 const CDP_URL = (process.env.PWNVIZ_CDP_URL ?? "http://127.0.0.1:9223").replace(/\/$/, "");
 const SHOT_PATH = resolve(process.env.PWNVIZ_SHOT ?? "docs/assets/workbench-phase2.png");
+const ZH_SHOT_PATH = resolve(
+  process.env.PWNVIZ_ZH_SHOT ?? "docs/assets/workbench-zh-cn.png",
+);
 const VAR_SHOT_PATH = resolve(
   process.env.PWNVIZ_VAR_SHOT ?? "docs/assets/workbench-variables.png",
 );
@@ -103,8 +106,14 @@ async function waitFor(client, description, expression, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   let lastValue;
   while (Date.now() < deadline) {
-    lastValue = await client.evaluate(expression);
-    if (lastValue) return lastValue;
+    try {
+      lastValue = await client.evaluate(expression);
+      if (lastValue) return lastValue;
+    } catch (error) {
+      // A navigation/reload in flight tears down the execution context; retry
+      // until the new document is ready instead of failing the whole run.
+      lastValue = `transient: ${error.message}`;
+    }
     await sleep(100);
   }
   const errorBanner = await client
@@ -121,7 +130,17 @@ async function listPages() {
 
 async function main() {
   const pages = await listPages();
-  const page = pages.find((item) => item.type === "page");
+  // Prefer the tab already showing the app; a fresh browser profile can expose
+  // extension pages as the first target, and those must not be navigated.
+  const page =
+    pages.find((item) => item.type === "page" && item.url.startsWith(APP_URL)) ??
+    pages.find(
+      (item) =>
+        item.type === "page" &&
+        !item.url.startsWith("chrome-extension://") &&
+        item.url !== "about:blank",
+    ) ??
+    pages.find((item) => item.type === "page");
   assert(page, "no CDP page target; start Edge with --remote-debugging-port");
 
   const client = new CdpClient(page.webSocketDebuggerUrl);
@@ -130,6 +149,9 @@ async function main() {
   try {
     await client.send("Page.enable");
     await client.send("Runtime.enable");
+    // A background tab throttles requestAnimationFrame and smooth scrolling,
+    // which would stall the RSP auto-centering assertions below.
+    await client.send("Page.bringToFront");
     await client.send("Emulation.setDeviceMetricsOverride", {
       width: 1680,
       height: 1050,
@@ -138,6 +160,57 @@ async function main() {
     });
     await client.send("Page.navigate", { url: APP_URL });
     await waitFor(client, "workbench render", `Boolean(document.querySelector('[data-testid="workbench"]'))`);
+
+    // ---- V1.1 i18n: default zh-CN, live switch, persistence ----------------
+    // Start from a clean storage state so "default language" is the real first
+    // load, not a leftover from a previous run of this script.
+    await client
+      .evaluate(`localStorage.clear()`)
+      .catch(() => undefined);
+    await client.send("Page.reload", { ignoreCache: false }).catch(() => undefined);
+    await sleep(400);
+    await waitFor(
+      client,
+      "workbench render after storage reset",
+      `Boolean(document.querySelector('[data-testid="workbench"]'))`,
+    );
+    await waitFor(
+      client,
+      "default locale applied",
+      `document.documentElement.lang === 'zh-CN' && Boolean(document.querySelector('[data-testid="language-switch"]'))`,
+      10_000,
+    );
+    const defaultLocaleLabel = await client.evaluate(
+      `document.querySelector('[data-testid="status-state"]')?.textContent?.trim() ?? ''`,
+    );
+    assert(
+      defaultLocaleLabel === "空闲",
+      `default UI is not Simplified Chinese: ${defaultLocaleLabel}`,
+    );
+
+    const switchLocale = async (locale) => {
+      await client.evaluate(`(() => {
+        const select = document.querySelector('[data-testid="language-switch"]');
+        if (!select) return false;
+        select.value = ${JSON.stringify(locale)};
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      })()`);
+      await waitFor(
+        client,
+        `locale ${locale}`,
+        `document.documentElement.lang === ${JSON.stringify(locale)}`,
+        10_000,
+      );
+    };
+    await switchLocale("en-US");
+    const storedLocale = await client.evaluate(`localStorage.getItem('pwnviz.locale')`);
+    assert(storedLocale === "en-US", `locale not persisted: ${storedLocale}`);
+    const englishStatus = await client.evaluate(
+      `document.querySelector('[data-testid="status-state"]')?.textContent?.trim() ?? ''`,
+    );
+    assert(englishStatus === "Stopped" || englishStatus === "Idle", `english UI did not update: ${englishStatus}`);
+    const languageFlow = { defaultLocale: "zh-CN", switched: "en-US", storedLocale };
 
     await waitFor(
       client,
@@ -154,8 +227,8 @@ async function main() {
       "real snapshot",
       `(() => {
         const value = document.querySelector('[data-testid="register-rip"]')?.getAttribute('data-value');
-        const state = document.querySelector('[data-testid="debug-state"]')?.textContent ?? '';
-        return Boolean(value && value.startsWith('0x')) && state.includes('stopped');
+        const state = document.querySelector('[data-testid="debug-state"]')?.getAttribute('data-state') ?? '';
+        return Boolean(value && value.startsWith('0x')) && state === 'STOPPED';
       })()`,
       90_000,
     );
@@ -176,7 +249,7 @@ async function main() {
     await waitFor(
       client,
       "status bar stopped",
-      `(document.querySelector('[data-testid="status-state"]')?.textContent ?? '').trim() === 'Stopped'`,
+      `document.querySelector('[data-testid="status-state"]')?.getAttribute('data-state') === 'STOPPED'`,
       10_000,
     );
     const breakpointText = await client.evaluate(
@@ -267,9 +340,10 @@ async function main() {
       `document.querySelectorAll('[data-testid="debug-log-entry"][data-level="gdb"]').length > 0`,
       20_000,
     );
-    const debugLogText = await client.evaluate(
-      `document.querySelector('[data-testid="debug-log-panel"]')?.textContent ?? ''`,
+    const debugLogGdbEntries = await client.evaluate(
+      `document.querySelectorAll('[data-testid="debug-log-entry"][data-level="gdb"]').length`,
     );
+    assert(debugLogGdbEntries > 0, "no GDB/MI output entries in the debug log");
     await client.evaluate(`document.querySelector('[data-testid="tab-memory"]').click()`);
     let before = await client.evaluate(`({
       snapshot: document.querySelector('[data-testid="snapshot-id"]')?.textContent ?? '',
@@ -298,21 +372,49 @@ async function main() {
       "newer snapshot after StepI",
       `(() => {
         const value = document.querySelector('[data-testid="register-rip"]')?.getAttribute('data-value');
-        const snapshot = document.querySelector('[data-testid="snapshot-id"]')?.textContent ?? '';
-        const state = document.querySelector('[data-testid="debug-state"]')?.textContent ?? '';
-        return Boolean(value && value !== ${JSON.stringify(before.rip)}) && state.includes('stopped');
+        const state = document.querySelector('[data-testid="debug-state"]')?.getAttribute('data-state') ?? '';
+        return Boolean(value && value !== ${JSON.stringify(before.rip)}) && state === 'STOPPED';
       })()`,
       60_000,
     );
+
+    // V1.1 performance regression gates: a single step must report fast-mode
+    // perf and use clearly fewer MI commands than the 26/step baseline.
+    const stepPerf = await client.evaluate(`(() => {
+      const node = document.querySelector('[data-testid="perf-summary"]');
+      if (!node) return null;
+      return {
+        ms: Number(node.getAttribute('data-perf-ms')),
+        mi: Number(node.getAttribute('data-mi-count')),
+        mode: node.getAttribute('data-mode'),
+      };
+    })()`);
+    assert(stepPerf, "perf summary missing from the status bar");
+    assert(stepPerf.mode === "fast", `default step snapshot is not fast mode: ${stepPerf.mode}`);
+    assert(
+      Number.isFinite(stepPerf.mi) && stepPerf.mi < 26,
+      `single step still performs too many MI commands: ${stepPerf.mi}`,
+    );
+    const renderPerf = await client.evaluate(
+      `window.__PWNVIZ_RENDER_PERF__?.stack?.commits ?? 0`,
+    );
+    assert(renderPerf > 0, "React Profiler did not record StackMemoryView commits");
 
     const after = await client.evaluate(`({
       snapshot: document.querySelector('[data-testid="snapshot-id"]')?.textContent ?? '',
       rip: document.querySelector('[data-testid="register-rip"]')?.getAttribute('data-value') ?? '',
       changedCells: document.querySelectorAll('[data-testid="byte-cell"][data-changed="true"]').length,
-      changedLabels: Array.from(document.querySelectorAll('[data-testid="stack-row"]'))
-        .map((row) => row.textContent)
-        .filter((text) => text.includes('changed')),
+      // Structural count: stack rows that contain at least one changed cell.
+      changedRows: new Set(
+        Array.from(document.querySelectorAll('[data-testid="byte-cell"][data-changed="true"]'))
+          .map((cell) => cell.closest('[data-testid="stack-row"]'))
+          .filter(Boolean),
+      ).size,
+      virtualized: document.querySelector('[data-testid="stack-scroll"]')?.getAttribute('data-virtualized'),
     })`);
+    const stackRowCount = await client.evaluate(
+      `document.querySelectorAll('[data-testid="stack-row"]').length`,
+    );
     assert(after.rip !== before.rip, "RIP did not change after StepI");
     assert(after.changedCells > 0, "no changed byte cell highlighted after StepI");
 
@@ -355,9 +457,9 @@ async function main() {
       `document.querySelector('[data-testid="disassembly-line"][data-current="false"]')?.click()`,
     );
     const selectionText = await client.evaluate(
-      `document.querySelector('[data-testid="workbench"]')?.textContent ?? ""`,
+      `Boolean(document.querySelector('[data-testid="selected-instruction"]'))`,
     );
-    assert(selectionText.includes("selected instruction"), "disassembly selection missing");
+    assert(selectionText === true, "disassembly selection missing");
 
     await client.evaluate(`document.querySelector('[data-testid="tab-diff"]').click()`);
     await waitFor(
@@ -422,8 +524,8 @@ async function main() {
       "entered add_numbers",
       `(() => {
         const value = document.querySelector('[data-testid="register-rip"]')?.getAttribute('data-value') ?? '';
-        const status = document.querySelector('[data-testid="status-state"]')?.textContent ?? '';
-        return value !== ${JSON.stringify(callAddress)} && status.includes('Stopped') ? value : '';
+        const status = document.querySelector('[data-testid="status-state"]')?.getAttribute('data-state') ?? '';
+        return value !== ${JSON.stringify(callAddress)} && status === 'STOPPED' ? value : '';
       })()`,
       30_000,
     );
@@ -433,20 +535,18 @@ async function main() {
     assert(BigInt(rspInside) < BigInt(rspAtCall), `RSP did not decrease entering function: ${rspAtCall} -> ${rspInside}`);
 
     await client.evaluate(`document.querySelector('[data-testid="tab-explanation"]').click()`);
-    const explanationText = await waitFor(
+    const explanationState = await waitFor(
       client,
       "instruction explanation",
       `(() => {
-        const text = document.querySelector('[data-testid="workbench"]')?.textContent ?? '';
-        return text.includes('last executed instruction') &&
-          (text.includes('measured differences only') || text.includes('rule:'))
-          ? text
-          : '';
+        const panel = document.querySelector('[data-testid="explanation-panel"]');
+        if (!panel) return '';
+        return panel.getAttribute('data-matched');
       })()`,
       20_000,
     );
     assert(
-      explanationText.includes("measured differences only") || explanationText.includes("rule:"),
+      explanationState === "true" || explanationState === "false",
       "explanation panel missing measured/rule state",
     );
     await client.evaluate(`document.querySelector('[data-testid="tab-memory"]').click()`);
@@ -463,8 +563,8 @@ async function main() {
       "returned from add_numbers",
       `(() => {
         const value = document.querySelector('[data-testid="register-rip"]')?.getAttribute('data-value') ?? '';
-        const status = document.querySelector('[data-testid="status-state"]')?.textContent ?? '';
-        return value !== ${JSON.stringify(ripInside)} && status.includes('Stopped');
+        const status = document.querySelector('[data-testid="status-state"]')?.getAttribute('data-state') ?? '';
+        return value !== ${JSON.stringify(ripInside)} && status === 'STOPPED';
       })()`,
       30_000,
     );
@@ -483,13 +583,13 @@ async function main() {
     await waitFor(
       client,
       "target exited",
-      `(document.querySelector('[data-testid="status-state"]')?.textContent ?? '').includes('Exited')`,
+      `document.querySelector('[data-testid="status-state"]')?.getAttribute('data-state') === 'EXITED'`,
       30_000,
     );
     const exited = await client.evaluate(
-      `(document.querySelector('[data-testid="status-state"]')?.textContent ?? '').trim()`,
+      `document.querySelector('[data-testid="status-state"]')?.getAttribute('data-state') ?? ''`,
     );
-    assert(exited === "Exited", `unexpected terminal status: ${exited}`);
+    assert(exited === "EXITED", `unexpected terminal status: ${exited}`);
 
     const oldSessionId = sessionId;
     await waitFor(
@@ -503,10 +603,10 @@ async function main() {
       client,
       "restart stopped at main",
       `(() => {
-        const status = document.querySelector('[data-testid="status-state"]')?.textContent ?? '';
+        const status = document.querySelector('[data-testid="status-state"]')?.getAttribute('data-state') ?? '';
         const rip = document.querySelector('[data-testid="register-rip"]')?.getAttribute('data-value') ?? '';
         const snap = document.querySelector('[data-testid="snapshot-id"]')?.textContent ?? '';
-        return status.includes('Stopped') && rip === ${JSON.stringify(before.rip)} && snap.includes('#1');
+        return status === 'STOPPED' && rip === ${JSON.stringify(before.rip)} && snap.includes('#1');
       })()`,
       60_000,
     );
@@ -528,11 +628,34 @@ async function main() {
     await waitFor(
       client,
       "session terminated in UI",
-      `(document.querySelector('[data-testid="debug-state"]')?.textContent ?? '').includes('idle')`,
+      `document.querySelector('[data-testid="debug-state"]')?.getAttribute('data-state') === 'IDLE'`,
       20_000,
     );
     const gone = await fetch(`${API_URL}/api/v1/sessions/${encodeURIComponent(sessionId)}`);
     assert(gone.status === 404, `session still exists after UI terminate: ${gone.status}`);
+
+    // ---- i18n persistence: switch back to zh-CN, reload, state must survive.
+    await switchLocale("zh-CN");
+    await client.send("Page.reload", { ignoreCache: false }).catch(() => undefined);
+    await sleep(400);
+    await waitFor(
+      client,
+      "locale persisted across reload",
+      `document.documentElement.lang === 'zh-CN' && localStorage.getItem('pwnviz.locale') === 'zh-CN'`,
+      15_000,
+    );
+    const reloadedStatus = await client.evaluate(
+      `document.querySelector('[data-testid="status-state"]')?.textContent?.trim() ?? ''`,
+    );
+    assert(reloadedStatus === "空闲", `locale did not survive reload: ${reloadedStatus}`);
+    languageFlow.persistedAfterReload = true;
+
+    // Screenshot of the default (Simplified Chinese) workbench for the docs.
+    const zhShot = await client.send("Page.captureScreenshot", {
+      format: "png",
+      captureBeyondViewport: false,
+    });
+    writeFileSync(ZH_SHOT_PATH, Buffer.from(zhShot.data, "base64"));
 
     console.log(
       JSON.stringify(
@@ -540,9 +663,13 @@ async function main() {
           ok: true,
           sessionId,
           before,
-          after: { ...after, changedLabels: after.changedLabels.length },
+          after: {
+            ...after,
+            changedLabels: after.changedRows,
+            stackRows: stackRowCount,
+          },
           breakpoints: breakpointText,
-          debugLogHasGdb: debugLogText.includes("gdb"),
+          debugLogHasGdb: debugLogGdbEntries > 0,
           variablesHaveProvenance:
             variablesText.includes("dwarf") && variablesText.includes("debug-info"),
           variablesScreenshot: VAR_SHOT_PATH,
@@ -550,7 +677,10 @@ async function main() {
           restartDisabled,
           rspVisible,
           inspector,
-          selection: selectionText.includes("selected instruction"),
+          selection: selectionText === true,
+          language: languageFlow,
+          stepPerf,
+          renderPerf: { stackCommits: renderPerf },
           fullFlow: {
             callAddress,
             rspAtCall,

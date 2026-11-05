@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { explainStep } from "./explain";
+import { createTranslator, explainStep } from "./explain";
+import enExplanation from "../i18n/locales/en-US/explanation.json";
 import type { Snapshot, StackRow } from "../types/debug";
 
 function row(address: string, qword: string | null): StackRow {
@@ -319,5 +320,30 @@ describe("explainStep", () => {
     const explanation = explainStep(previous, current, "finish");
     expect(explanation.matched).toBe(false);
     expect(explanation.headline).toContain("多条指令");
+  });
+
+  it("renders the same measurement in English through the injected translator", () => {
+    const previous = snapshot(
+      1,
+      { rip: "0x0000000000401178", rsp: "0x00007fffffffe210", rbp: "0x00007fffffffe220" },
+      instruction("0x0000000000401178", "call 0x401136 <add_numbers>", "e8b9ffffff"),
+      [],
+    );
+    const current = snapshot(
+      2,
+      { rip: "0x0000000000401144", rsp: "0x00007fffffffe208", rbp: "0x00007fffffffe220" },
+      instruction("0x0000000000401144", "push rbp", "55"),
+      [row("0x00007fffffffe208", "0x000000000040117d")],
+      ["rip", "rsp"],
+    );
+
+    const explanation = explainStep(previous, current, "step", createTranslator(enExplanation));
+    expect(explanation.matched).toBe(true);
+    expect(explanation.rule).toBe("call");
+    expect(explanation.headline).toContain("call");
+    expect(explanation.lines.join(" ")).toContain("return address");
+    // Register names and addresses stay verbatim in both languages.
+    expect(explanation.lines.join(" ")).toContain("0x000000000040117d");
+    expect(explanation.facts[0]).toContain("RIP");
   });
 });

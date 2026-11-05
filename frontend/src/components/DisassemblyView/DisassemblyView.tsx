@@ -1,3 +1,6 @@
+import { memo } from "react";
+import { useTranslation } from "react-i18next";
+
 import { compareAddress, normalizeAddress } from "../../lib/address";
 import { useDebugStore } from "../../stores/debugStore";
 import { Panel } from "../common/Panel";
@@ -6,7 +9,10 @@ interface DisassemblyViewProps {
   onCollapse?: () => void;
 }
 
-export function DisassemblyView({ onCollapse }: DisassemblyViewProps) {
+export const DisassemblyView = memo(function DisassemblyView({
+  onCollapse,
+}: DisassemblyViewProps) {
+  const { t } = useTranslation(["panels", "common"]);
   const snapshot = useDebugStore((state) => state.snapshot);
   const session = useDebugStore((state) => state.session);
   const selectedInstructionAddress = useDebugStore(
@@ -27,8 +33,8 @@ export function DisassemblyView({ onCollapse }: DisassemblyViewProps) {
 
   return (
     <Panel
-      title="Disassembly"
-      hint="frame 0"
+      title={t("panels:disassembly.title")}
+      hint={t("panels:disassembly.hint")}
       className="min-w-0"
       onCollapse={onCollapse}
       actions={
@@ -37,7 +43,7 @@ export function DisassemblyView({ onCollapse }: DisassemblyViewProps) {
             className={`mr-1 inline-block h-1.5 w-1.5 ${rip ? "bg-cyan-400" : "bg-slate-600"}`}
             aria-hidden="true"
           />
-          {rip ? "rip" : "no rip"}
+          {rip ? t("panels:disassembly.rip") : t("panels:disassembly.noRip")}
         </span>
       }
     >
@@ -51,16 +57,24 @@ export function DisassemblyView({ onCollapse }: DisassemblyViewProps) {
                 title={`${instruction.address} ${instruction.text ?? instruction.mnemonic ?? ""}`}
               >
                 <span className="text-cyan-300/90">{instruction.address}</span>{" "}
-                <span className="text-[#d8e4ef]">{instruction.text ?? instruction.mnemonic}</span>
+                <span className="text-[#d8e4ef]">
+                  {instruction.text ?? instruction.mnemonic}
+                </span>
               </span>
               <span className="shrink-0 font-mono text-[9px] text-[#526477]">
                 {instruction.bytes ?? "—"}
               </span>
             </div>
             <div className="mt-1 flex min-w-0 items-center gap-2 font-mono text-[9px] text-[#5f7186]">
-              <span className="truncate">{instruction.function ?? "unknown function"}</span>
+              <span className="truncate">
+                {instruction.function ?? t("panels:disassembly.unknownFunction")}
+              </span>
               <span className="text-[#334255]">·</span>
-              <span className="truncate">{session?.stop_reason ?? snapshot?.stop_reason ?? "stopped"}</span>
+              <span className="truncate">
+                {session?.stop_reason ??
+                  snapshot?.stop_reason ??
+                  t("panels:disassembly.stopped")}
+              </span>
             </div>
           </div>
         ) : null}
@@ -69,11 +83,10 @@ export function DisassemblyView({ onCollapse }: DisassemblyViewProps) {
           {lines.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center">
               <span className="border border-[#263447] px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-[#6e8095]">
-                no disassembly
+                {t("panels:disassembly.empty")}
               </span>
               <p className="max-w-xs text-[10px] leading-4 text-[#617186]">
-                Launch a sample and stop at <span className="font-mono text-[#9aabbd]">main</span> to
-                see instructions around RIP.
+                {t("panels:disassembly.emptyHint")}
               </p>
             </div>
           ) : (
@@ -83,7 +96,9 @@ export function DisassemblyView({ onCollapse }: DisassemblyViewProps) {
                 const isCurrent =
                   Boolean(rip) && lineAddress !== null && compareAddress(lineAddress, rip) === 0;
                 const isSelected =
-                  Boolean(selected) && lineAddress !== null && compareAddress(lineAddress, selected) === 0;
+                  Boolean(selected) &&
+                  lineAddress !== null &&
+                  compareAddress(lineAddress, selected) === 0;
                 const hasBreakpoint =
                   lineAddress !== null && breakpointAddresses.has(lineAddress);
                 return (
@@ -110,12 +125,15 @@ export function DisassemblyView({ onCollapse }: DisassemblyViewProps) {
                     </span>
                     <span className="flex items-center gap-0.5 text-[9px]">
                       {isCurrent ? (
-                        <span className="text-cyan-300" title="current instruction">
+                        <span
+                          className="text-cyan-300"
+                          title={t("panels:disassembly.currentInstruction")}
+                        >
                           ▶
                         </span>
                       ) : null}
                       {hasBreakpoint ? (
-                        <span className="text-rose-400" title="breakpoint">
+                        <span className="text-rose-400" title={t("panels:disassembly.breakpoint")}>
                           ●
                         </span>
                       ) : null}
@@ -131,9 +149,9 @@ export function DisassemblyView({ onCollapse }: DisassemblyViewProps) {
         </div>
 
         <div className="shrink-0 border-t border-[#1a2431] px-2.5 py-1 font-mono text-[8px] uppercase tracking-[0.08em] text-[#4d5e72]">
-          click to select · breakpoints read-only
+          {t("panels:disassembly.footer")}
         </div>
       </div>
     </Panel>
   );
-}
+});

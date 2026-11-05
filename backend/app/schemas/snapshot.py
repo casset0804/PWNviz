@@ -10,6 +10,56 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+SnapshotMode = Literal["fast", "full"]
+VariablesState = Literal[
+    "full", "updated", "cached", "deferred", "unavailable"
+]
+FramesState = Literal["fresh", "cached", "unavailable"]
+
+
+class SnapshotPerf(BaseModel):
+    """Measured cost of one snapshot (all durations in monotonic milliseconds).
+
+    ``mode`` is ``fast`` for step-to-step updates and ``full`` for launch and
+    explicit refreshes. ``serialize_ms``/``broadcast_ms``/``ws_send_ms`` are
+    filled in by the session/WebSocket layer after the payload exists; they are
+    ``None`` until measured so the snapshot never claims an unmeasured value.
+    """
+
+    snapshot_id: int = 0
+    mode: SnapshotMode = "full"
+    total_ms: float = 0.0
+    registers_ms: float = 0.0
+    frames_ms: float = 0.0
+    disassembly_ms: float = 0.0
+    memory_ms: float = 0.0
+    variables_ms: float = 0.0
+    diff_ms: float = 0.0
+    serialize_ms: float | None = None
+    broadcast_ms: float | None = None
+    ws_send_ms: float | None = None
+    frames_state: FramesState = "fresh"
+    variables_state: VariablesState = "full"
+    frames_refreshed: bool = True
+    disassembly_source: Literal["gdb", "cache", "none"] = "gdb"
+    # Snapshot id in which the cached disassembly window was fetched from GDB.
+    disassembly_version: int | None = None
+    mi_command_count: int = 0
+    mi_time_ms: float = 0.0
+    mi_by_command: dict[str, int] = Field(default_factory=dict)
+    mi_by_command_ms: dict[str, float] = Field(default_factory=dict)
+    registers_commands: int = 0
+    frames_commands: int = 0
+    disassembly_commands: int = 0
+    memory_commands: int = 0
+    stack_read_commands: int = 0
+    memory_batch_reads: int = 0
+    memory_chunk_reads: int = 0
+    memory_degraded: bool = False
+    variable_commands: int = 0
+    diff_commands: int = 0
+    payload_bytes: int = 0
+
 
 class FrameModel(BaseModel):
     level: int
@@ -121,3 +171,13 @@ class Snapshot(BaseModel):
     variables: list[VariableNode] = Field(default_factory=list)
     variables_available: bool = False
     warnings: list[str] = Field(default_factory=list)
+    # V1.1 additive fields. Older clients ignore them; newer clients use them to
+    # label cached (not freshly read) frames/variables honestly.
+    mode: SnapshotMode = "full"
+    frames_state: FramesState = "fresh"
+    frames_stale: bool = False
+    frames_version: int | None = None
+    variables_state: VariablesState = "full"
+    variables_stale: bool = False
+    variables_version: int | None = None
+    perf: SnapshotPerf | None = None

@@ -2,6 +2,10 @@
 
 Every error surfaced to the browser carries a stable machine-readable ``code`` so
 the UI can render specific guidance (missing GDB, unsupported version, ...).
+
+V1.1 adds optional ``params``: the structured values a front-end needs to build a
+localized sentence (``{"state": "RUNNING", "required": "STOPPED"}``). The English
+``message`` is kept unchanged for compatibility, logs and non-i18n clients.
 """
 
 from __future__ import annotations
@@ -15,13 +19,22 @@ class PwnvizError(Exception):
     status_code: int = 500
     code: str = "internal_error"
 
-    def __init__(self, message: str, *, detail: Any | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        detail: Any | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.detail = detail
+        self.params: dict[str, Any] = params or {}
 
     def to_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"code": self.code, "message": self.message}
+        if self.params:
+            payload["params"] = self.params
         if self.detail is not None:
             payload["detail"] = self.detail
         return payload

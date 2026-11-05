@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 interface PanelProps {
   title: string;
@@ -17,6 +18,7 @@ export function Panel({
   className,
   onCollapse,
 }: PanelProps) {
+  const { t } = useTranslation("common");
   return (
     <section
       className={`flex min-h-0 min-w-0 flex-col bg-[#0b1017] ${className ?? ""}`}
@@ -37,11 +39,11 @@ export function Panel({
             <button
               type="button"
               onClick={onCollapse}
-              title={`Collapse ${title}`}
-              aria-label={`Collapse ${title}`}
+              title={t("collapse", { title })}
+              aria-label={t("collapse", { title })}
               className="grid h-5 w-5 place-items-center border border-[#202c3b] bg-[#0d141d] font-mono text-[11px] leading-none text-[#6f8094] transition-colors hover:border-[#3a4b60] hover:text-[#c4d2e1]"
             >
-              ‹
+              —
             </button>
           ) : null}
         </div>

@@ -14,7 +14,38 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
 
 ---
 
-## 当前状态：Phase 3 实时工作台 + Phase 4 变量语义（部分）
+## 当前状态：Phase 3 实时工作台 + Phase 4 变量语义 + V1.1 性能与中英双语
+
+### V1.1 亮点（真实 GDB、真实 100 步实测）
+
+| 指标 | V1.0 | V1.1 | 变化 |
+|---|---|---|---|
+| 单步耗时 p50 | 2630.51 ms | **45.84 ms** | 57.4× |
+| 单步 GDB/MI 命令数 p50 | 26 | **4** | 6.5× |
+| 栈内存读取命令/步 | 9.00 | 1.12 | 8× |
+| 变量命令/步 | 12.52 | 2.08 | 6× |
+| launch 快照 | 3535.9 ms | 350.9 ms | 10.1× |
+| 前端 commits/快照 | 2.22 | 1.04 | 2.1× |
+| StackMemoryView 渲染 p50 | 5.3 ms | **0.3 ms** | 17.7× |
+
+- **Fast / Full 两级快照**：单步默认 Fast（寄存器、栈内存、diff、当前指令、
+  增量变量），launch 与显式刷新为 Full；两种模式都只读真实 GDB 数据；
+- **一次批量读取栈窗口**：512 字节默认一条 `-data-read-memory-bytes`，失败或跨页时
+  自动降级分块，不可读字节仍显示为 `--`，绝不写成 0；
+- **变量对象缓存 + `-var-update`**：不再每步 `-var-create`/`-var-delete`，
+  帧变化才重建；每个节点保留 `source` / `confidence`；
+- **反汇编窗口缓存**：RIP 未离开窗口时 0 条命令，窗口带抓取快照版本；
+- **帧刷新证据驱动**：只在 `call`/`ret`/`finish`/`continue` 等情况下 unwind，
+  不用 RBP 判断帧变化；缓存时 UI 明确标注；
+- **PerfStats**：每张快照携带阶段耗时、MI 命令数与 payload 字节，
+  `GET /api/v1/sessions/{id}/performance` 提供 p50/p95；
+- **完整中英双语**：默认简体中文，Toolbar 右上角可切 English，
+  无需刷新，`localStorage["pwnviz.locale"]` 持久化；寄存器/指令/变量/地址/
+  字节/GDB 原文保持原样；
+- **前端渲染**：`React.memo` 化的 ByteCell/StackRowView + 每快照一次行模型构建 +
+  memo 面板 + 分片 selector；>200 行才启用固定行高虚拟滚动；
+- 详细数据、方法与已知成本：[docs/PERFORMANCE.md](docs/PERFORMANCE.md)；
+  语言覆盖与错误码：[docs/I18N.md](docs/I18N.md)。
 
 已完成：
 
@@ -78,10 +109,14 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
   `Host` 白名单、跨站浏览器请求拒绝、CORS 收紧、子进程组超时清理；
 - 生命周期清理：DELETE/取消/退出/reader 失败均回收 GDB，WebSocket 队列有界；
   无活动 WebSocket 的 session 默认空闲 30 分钟后由 reaper 回收；
-- 单元测试与真实环境集成测试（pytest 123 passed，含真实 GDB 会话与 MI 控制器测试、变量矩阵）；
+- 单元测试与真实环境集成测试（pytest **135 passed**，含真实 GDB 会话与 MI 控制器测试、变量矩阵、
+  fast/full 快照契约、变量缓存与反汇编缓存）；
 - CDP E2E：`scripts/ui_smoke.mjs` 真实跑通
   main → StepI → Step Into add_numbers → RSP 变化 → Finish → Continue 退出 →
-  Restart，页面不刷新；前端单测 25 passed；
+  Restart，页面不刷新；并验证默认中文、切英文、刷新后语言保持；
+  前端单测 **38 passed**（含 i18n key 对齐、虚拟滚动窗口）；
+- 性能基线/回归脚本：`scripts/benchmark_stepping.py`（后端 100 步）、
+  `scripts/perf_frontend.mjs`（真实 100 步的前端渲染）；
 - 环境检查脚本在本机 0 failure / 0 warning。
 
 ![Phase 3 工作台（真实 GDB 会话）](docs/assets/workbench-phase2.png)
@@ -92,6 +127,11 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
 
 ![折叠两侧面板后的 Stack 聚焦](docs/assets/workbench-1280-focus.png)
 
+![默认简体中文界面](docs/assets/workbench-zh-cn.png)
+
+> 默认界面为简体中文；Toolbar 右上角可切换 English（无需刷新，选择保存在
+> `localStorage["pwnviz.locale"]`）。
+
 > 截图来自真实 GDB 会话：RSP、RBP、RIP 与栈字节均来自后端 Snapshot；
 > 状态栏与断点来自 WebSocket 事件；高亮的 `0a` 是 StepI 后 diff 检测到的真实
 > 栈字节变化。
@@ -101,7 +141,8 @@ ELF 进程，用真实 GDB（MI3）执行指令，采集真实寄存器/栈帧/�
 - 断点增删 API、源码视图；
 - 更完整的 DWARF 类型/嵌套指针/容器语义；
 - 快照历史时间轴回放；
-- 更完整的指令解释规则（当前只覆盖有限常用指令）。
+- 更完整的指令解释规则（当前只覆盖有限常用指令）；
+- 安全隔离（容器/非 root/禁网/资源限额）与多用户认证。
 
 阶段计划与验收标准见 [docs/PHASES.md](docs/PHASES.md)。
 
@@ -175,8 +216,10 @@ npm run dev
 ### 6. 运行测试
 
 ```bash
-wsl -d Ubuntu-22.04 -- bash -lc 'cd /mnt/f/Pwnvis/backend && ~/.venvs/pwnviz/bin/python -m pytest -v'
+wsl -d Ubuntu-22.04 -- bash /mnt/f/Pwnvis/scripts/run_backend_tests.sh -v
 ```
+
+（等价于 `cd backend && ~/.venvs/pwnviz/bin/python -m pytest -v`。）
 
 虚拟环境默认安装在 WSL ext4 的 `~/.venvs/pwnviz`（避免 `/mnt/f` 上的 NTFS
 I/O 拖慢 pip），可用 `PWNVIZ_VENV` 覆盖。
@@ -185,7 +228,9 @@ I/O 拖慢 pip），可用 `PWNVIZ_VENV` 覆盖。
 pwndbg 可用时真实加载它；`tests/integration/test_gdb_mi_smoke.py` 还会真实加载
 样例、命中 `main`、单步一条指令、读取寄存器/内存并确认 inferior 进程退出。
 `test_session_lifecycle.py` 通过 REST 跑完整会话（launch → 快照 → stepi → diff
-→ finish → 终止清理），`test_websocket_stream.py` 验证实时推送。
+→ finish → 终止清理），`test_websocket_stream.py` 验证实时推送，
+`test_fast_snapshot.py` 验证 fast/full 契约、精确 byte diff、批量读取、变量缓存与
+反汇编缓存。
 不会用 mock 冒充调试成功。
 
 前端 UI 的真实验收（需要后端 + Vite 已启动，Edge 开启 CDP）：
@@ -197,19 +242,27 @@ pwndbg 可用时真实加载它；`tests/integration/test_gdb_mi_smoke.py` 还�
 ```
 
 ```bash
-node scripts/ui_smoke.mjs
+node scripts/ui_smoke.mjs        # 真实 GDB 全流程 + 中英切换 + 性能门限
+node scripts/perf_frontend.mjs   # 100 次真实单步的前端渲染/复用统计
 ```
 
-前端纯函数单测（地址 BigInt / marker / unreadable / diff）：
+前端纯函数单测（地址 BigInt / marker / unreadable / diff / i18n / 虚拟窗口）：
 
 ```bash
 cd frontend
 npm test
+npm run build
 ```
 
-该脚本真实点击 Run / StepI，检查栈画布行数、RSP/RBP marker、changed cell、
-Memory Inspector 选择、汇编选择、Diff 标签与 Terminate，并输出截图到
-`docs/assets/workbench-phase2.png`。
+性能基线（真实 GDB，100 步）：
+
+```bash
+wsl -d Ubuntu-22.04 -- ~/.venvs/pwnviz/bin/python \
+  /mnt/f/Pwnvis/scripts/benchmark_stepping.py --label optimized \
+  --out /mnt/f/Pwnvis/docs/benchmarks/optimized.json
+```
+
+报告与对比见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)。
 
 ### 7. 配置（`.env`）
 
@@ -228,6 +281,13 @@ Memory Inspector 选择、汇编选择、Diff 标签与 Terminate，并输出截
 | `PWNVIZ_GDB_STOP_TIMEOUT_SECONDS` | `15` | 等待 `*stopped` 的预算 |
 | `PWNVIZ_SESSION_IDLE_TIMEOUT_SECONDS` | `1800` | 无 WebSocket 的 session 空闲回收时间 |
 | `PWNVIZ_SESSION_REAPER_INTERVAL_SECONDS` | `30` | 空闲 session reaper 扫描间隔 |
+| `PWNVIZ_SNAPSHOT_MODE` | `fast` | 默认快照模式（`fast`/`full`） |
+| `PWNVIZ_MEMORY_BATCH_MAX_BYTES` | `1024` | 栈窗口单次批量读取上限 |
+| `PWNVIZ_MEMORY_CHUNK_SIZE` | `64` | 批量失败后的分块大小 |
+| `PWNVIZ_VARIABLE_CACHE_MAX_OBJECTS` | `192` | GDB 变量对象上限 |
+| `PWNVIZ_FRAME_REFRESH_INTERVAL` | `12` | 帧缓存的安全刷新上限（快照数） |
+| `PWNVIZ_MI_SETTLE_SECONDS` | `0.01` | pygdbmi 批次收敛窗口（单命令延迟） |
+| `PWNVIZ_PERF_HISTORY_SIZE` | `120` | 性能历史条数 |
 
 可选调优项（`PWNVIZ_*`：pwndbg 开关、命令超时、缓存 TTL、CORS、栈窗口、
 快照上限）见 [.env.example](.env.example)。旧的 `PWNVIZ_GDB_BINARY` /
@@ -248,7 +308,8 @@ Pwnvis/
 │       ├── app/              # Workbench 布局
 │       ├── components/       # Toolbar / StackMemoryView / RegisterPanel / ...
 │       ├── hooks/            # useCapabilities / useSamples
-│       ├── services/         # 类型化 API 客户端
+│       ├── i18n/             # i18next + locales/{zh-CN,en-US}/ 7 个命名空间
+│       ├── services/         # 类型化 API 客户端（code + params）
 │       ├── stores/           # Zustand 单一 debug 状态（snapshot/session/UI）
 │       └── types/            # 与后端 schema 对齐的 TS 类型
 ├── backend/                  # FastAPI
@@ -256,15 +317,16 @@ Pwnvis/
 │   │   ├── api/              # health / capabilities / samples / sessions / websocket
 │   │   ├── core/             # config / errors / logging / proc / security
 │   │   ├── debugger/         # environment 探测 + gdb_process / mi_controller / pwndbg_loader
-│   │   ├── sessions/         # state / session / manager
-│   │   ├── collector/        # registers / frames / memory / disassembly / snapshot
-│   │   ├── analysis/         # byte-level diff
+│   │   ├── sessions/         # state / session (fast/full, refresh, perf) / manager
+│   │   ├── collector/        # registers / frames / memory / disassembly / variables / snapshot
+│   │   ├── analysis/         # byte-level diff + perf 统计
 │   │   ├── samples/          # 样例发现
 │   │   └── schemas/          # Pydantic v2 模型（capabilities / samples / session / snapshot）
 │   └── tests/                # unit + 真实 GDB 集成测试
 ├── samples/                  # 教学 C 样例与 README
-├── scripts/                  # bootstrap / 环境检查 / 编译 / 启动
+├── scripts/                  # bootstrap / 环境检查 / 编译 / 启动 / benchmark / E2E
 ├── docs/                     # ARCHITECTURE / API / DEVELOPMENT / PHASES / SECURITY
+│                             # PERFORMANCE / I18N / benchmarks/
 ├── .env.example
 └── README.md
 ```
@@ -282,7 +344,10 @@ Pwnvis/
 5. 原始字节是事实；变量名、类型、返回地址只是语义标注，必须有 DWARF/GDB 证据；
 6. RBP 仅是寄存器，调用栈以 GDB frame unwinder 为依据；
 7. pwndbg 是可选增强层，加载失败自动退化为原生 GDB；
-8. MVP 仅面向本机可信教学 ELF，不开放公网任意文件执行。
+8. MVP 仅面向本机可信教学 ELF，不开放公网任意文件执行；
+9. 快照分 Fast / Full 两级，但**缓存必须是显式状态**（`cached`/`deferred` +
+   `*_version`），不能把旧值当成刚测得的值；
+10. 所有用户可见文本走 i18next（默认简体中文），技术标识符与 GDB 原文不翻译。
 
 详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
@@ -301,7 +366,7 @@ Pwnvis/
 
 ---
 
-## API（Phase 1）
+## API
 
 | Method | Endpoint | 说明 |
 |---|---|---|
@@ -312,11 +377,13 @@ Pwnvis/
 | GET | `/api/v1/samples/{id}` | 单个样例 |
 | POST | `/api/v1/sessions` | 创建会话（`sample_id`、可选 `stop_at`、`load_pwndbg`） |
 | GET | `/api/v1/sessions/{id}` | 会话状态、PID、快照数量 |
-| POST | `/api/v1/sessions/{id}/launch` | 启动 GDB、加载 ELF、停在 `main` |
-| POST | `/api/v1/sessions/{id}/actions` | 白名单动作（continue/interrupt/stepi/nexti/step/next/finish 等） |
+| POST | `/api/v1/sessions/{id}/launch` | 启动 GDB、加载 ELF、停在 `main`（Full 快照） |
+| POST | `/api/v1/sessions/{id}/actions` | 白名单动作；可选 `mode: "fast" \| "full"` |
+| POST | `/api/v1/sessions/{id}/refresh` | 不执行指令，重新采集当前停止点（帧/反汇编/变量） |
+| GET | `/api/v1/sessions/{id}/performance` | 最近一次 + 最近 20 次 + p50/p95 性能数据 |
 | GET | `/api/v1/sessions/{id}/snapshots` | 真实快照历史 |
 | DELETE | `/api/v1/sessions/{id}` | 终止会话并清理 GDB/inferior |
-| WS | `/api/v1/sessions/{id}/stream` | `session.state` 与 `snapshot` 实时事件 |
+| WS | `/api/v1/sessions/{id}/stream` | `session.state` / `snapshot` / `debugger.*` 实时事件 |
 
 快速验证（后端启动后）：
 

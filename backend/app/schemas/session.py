@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.schemas.snapshot import Snapshot
+from app.schemas.snapshot import Snapshot, SnapshotMode
 
 ActionName = Literal[
     "launch",
@@ -55,6 +55,24 @@ class SessionInfo(BaseModel):
 
 class ActionRequest(BaseModel):
     action: ActionName
+    mode: SnapshotMode | None = Field(
+        default=None,
+        description="Optional snapshot mode override; defaults to the session mode (fast).",
+    )
+
+
+class RefreshRequest(BaseModel):
+    """Re-collect the current stop without executing the inferior."""
+
+    mode: SnapshotMode = "full"
+
+
+class PerfReport(BaseModel):
+    session_id: str
+    last: dict[str, Any] | None = None
+    samples: int = 0
+    aggregate: dict[str, Any] = Field(default_factory=dict)
+    recent: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ActionResponse(BaseModel):

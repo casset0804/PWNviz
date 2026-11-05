@@ -100,6 +100,7 @@ class SessionManager:
         if sample is None:
             raise SampleNotFoundError(
                 f"Unknown sample {request.sample_id!r}.",
+                params={"sample_id": request.sample_id},
                 detail={
                     "available": [
                         record.id
@@ -110,6 +111,7 @@ class SessionManager:
         if not sample.binary_exists:
             raise SampleNotBuiltError(
                 f"Sample {sample.id!r} has no compiled binary.",
+                params={"sample_id": sample.id},
                 detail={"build_command": sample.build_command()},
             )
 
@@ -129,6 +131,7 @@ class SessionManager:
             if len(self._sessions) >= max(1, settings.session_max_active):
                 raise TooManySessionsError(
                     "Too many active debug sessions.",
+                    params={"max_active": settings.session_max_active},
                     detail={"max_active": settings.session_max_active},
                 )
             self._sessions[session.session_id] = session

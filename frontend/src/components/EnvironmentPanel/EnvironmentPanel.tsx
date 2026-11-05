@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+
 import type { Capabilities, SampleInfo } from "../../types/api";
 import { StatusBadge, type Tone } from "../common/StatusBadge";
 
@@ -14,12 +16,12 @@ interface EnvironmentPanelProps {
 
 const PWNDBG_STATUS: Record<
   Capabilities["pwndbg"]["status"],
-  { tone: Tone; label: string }
+  { tone: Tone; key: string }
 > = {
-  not_found: { tone: "idle", label: "not found - native GDB only" },
-  detected: { tone: "info", label: "found on disk, not loaded" },
-  verified: { tone: "ok", label: "loaded and verified" },
-  load_failed: { tone: "error", label: "found, failed to load" },
+  not_found: { tone: "idle", key: "panels:environment.pwndbgNotFound" },
+  detected: { tone: "info", key: "panels:environment.pwndbgDetected" },
+  verified: { tone: "ok", key: "panels:environment.pwndbgVerified" },
+  load_failed: { tone: "error", key: "panels:environment.pwndbgLoadFailed" },
 };
 
 function formatBytes(size: number | null): string {
@@ -72,6 +74,7 @@ export function EnvironmentPanel({
   onRefresh,
   onVerifyPwndbg,
 }: EnvironmentPanelProps) {
+  const { t } = useTranslation(["panels", "common"]);
   const pwndbg = capabilities?.pwndbg;
   const pwndbgStatus = pwndbg ? PWNDBG_STATUS[pwndbg.status] : null;
 
@@ -79,18 +82,24 @@ export function EnvironmentPanel({
     <div className="space-y-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge tone={error ? "error" : loading ? "info" : "ok"}>
-          {error ? "probe failed" : loading ? "probing host" : "probe complete"}
+          {error
+            ? t("panels:environment.failed")
+            : loading
+              ? t("panels:environment.probing")
+              : t("panels:environment.complete")}
         </StatusBadge>
         {capabilities ? (
           <StatusBadge tone={capabilities.ready ? "ok" : "warn"}>
             {capabilities.ready
-              ? "ready for real sessions"
-              : "not ready for real sessions"}
+              ? t("panels:environment.ready")
+              : t("panels:environment.notReady")}
           </StatusBadge>
         ) : null}
         {capabilities ? (
           <span className="font-mono text-[10px] text-slate-600">
-            generated {capabilities.generated_at}
+            {t("panels:environment.generated", {
+              time: capabilities.generated_at,
+            })}
           </span>
         ) : null}
 
@@ -101,16 +110,20 @@ export function EnvironmentPanel({
             disabled={loading || verifying}
             className="rounded border border-[#263044] bg-[#111722] px-2.5 py-1 font-mono text-[11px] text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50"
           >
-            {loading ? "probing..." : "re-probe"}
+            {loading
+              ? t("panels:environment.reprobing")
+              : t("panels:environment.reprobe")}
           </button>
           <button
             type="button"
             onClick={onVerifyPwndbg}
             disabled={loading || verifying || !pwndbg || pwndbg.status === "not_found"}
-            title="Load pwndbg into a throwaway GDB process to prove it works"
+            title={t("panels:environment.verifyTitle")}
             className="rounded border border-emerald-700/50 bg-emerald-900/20 px-2.5 py-1 font-mono text-[11px] text-emerald-300 hover:border-emerald-500 disabled:opacity-40"
           >
-            {verifying ? "verifying pwndbg..." : "verify pwndbg load"}
+            {verifying
+              ? t("panels:environment.verifying")
+              : t("panels:environment.verifyPwndbg")}
           </button>
         </div>
       </div>
@@ -118,21 +131,20 @@ export function EnvironmentPanel({
       {error ? (
         <div className="rounded border border-rose-500/30 bg-rose-500/5 p-3">
           <p className="text-[11px] font-semibold text-rose-300">
-            Cannot reach the PWNviz backend
+            {t("panels:environment.unreachable")}
           </p>
           <p className="mt-1 font-mono text-[11px] leading-5 text-rose-200/80">
             {error}
           </p>
           <p className="mt-2 font-mono text-[10px] text-slate-500">
-            run from the repo root: bash scripts/dev_backend.sh
+            {t("panels:environment.runBackend")}
           </p>
         </div>
       ) : null}
 
       {!capabilities && !error ? (
         <p className="font-mono text-[11px] text-slate-500">
-          Running real host probes: gdb --version, embedded Python, MI3 support,
-          pwndbg detection and sample discovery...
+          {t("panels:environment.probingBody")}
         </p>
       ) : null}
 
@@ -140,7 +152,7 @@ export function EnvironmentPanel({
         <>
           <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
             <Card
-              title="GDB"
+              title={t("panels:environment.gdb")}
               status={
                 <StatusBadge
                   tone={
@@ -151,26 +163,32 @@ export function EnvironmentPanel({
                 >
                   {capabilities.gdb.available
                     ? capabilities.gdb.supported
-                      ? "usable"
-                      : "too old"
-                    : "missing"}
+                      ? t("panels:environment.usable")
+                      : t("panels:environment.tooOld")
+                    : t("panels:environment.missing")}
                 </StatusBadge>
               }
             >
-              <Row label="version">
-                {capabilities.gdb.version ?? "not found"}
+              <Row label={t("panels:environment.version")}>
+                {capabilities.gdb.version ?? t("panels:environment.notDetected")}
               </Row>
-              <Row label="minimum">{capabilities.gdb.minimum_version}</Row>
-              <Row label="path">{capabilities.gdb.path ?? "-"}</Row>
-              <Row label="MI3">
-                {capabilities.gdb.supports_mi3 ? "accepted" : "rejected"}
+              <Row label={t("panels:environment.minimum")}>
+                {capabilities.gdb.minimum_version}
               </Row>
-              <Row label="gdb python">
+              <Row label={t("panels:environment.path")}>
+                {capabilities.gdb.path ?? "-"}
+              </Row>
+              <Row label={t("panels:environment.mi3")}>
+                {capabilities.gdb.supports_mi3
+                  ? t("panels:environment.accepted")
+                  : t("panels:environment.rejected")}
+              </Row>
+              <Row label={t("panels:environment.gdbPython")}>
                 {capabilities.gdb.python.available
                   ? capabilities.gdb.python.version
-                  : "unavailable"}
+                  : t("panels:environment.unavailable")}
               </Row>
-              <Row label="probe">
+              <Row label={t("panels:environment.probe")}>
                 {capabilities.gdb.duration_ms ?? "-"} ms
               </Row>
               {capabilities.gdb.error ? (
@@ -181,18 +199,26 @@ export function EnvironmentPanel({
             </Card>
 
             <Card
-              title="pwndbg"
+              title={t("panels:environment.pwndbg")}
               status={
                 pwndbgStatus ? (
                   <StatusBadge tone={pwndbgStatus.tone}>
-                    {pwndbgStatus.label}
+                    {t(pwndbgStatus.key)}
                   </StatusBadge>
                 ) : null
               }
             >
-              <Row label="enabled">{pwndbg?.enabled ? "yes" : "no (config)"}</Row>
-              <Row label="version">{pwndbg?.version ?? "-"}</Row>
-              <Row label="install">{pwndbg?.path ?? "not detected"}</Row>
+              <Row label={t("panels:environment.enabled")}>
+                {pwndbg?.enabled
+                  ? t("panels:environment.pwndbgEnabledYes")
+                  : t("panels:environment.pwndbgEnabledNo")}
+              </Row>
+              <Row label={t("panels:environment.version")}>
+                {pwndbg?.version ?? "-"}
+              </Row>
+              <Row label={t("panels:environment.install")}>
+                {pwndbg?.path ?? t("panels:environment.notDetected")}
+              </Row>
               <Row label="gdbinit">{pwndbg?.gdbinit ?? "-"}</Row>
               {pwndbg?.detail ? (
                 <p className="mt-2 text-[10px] leading-4 text-slate-500">
@@ -202,41 +228,47 @@ export function EnvironmentPanel({
             </Card>
 
             <Card
-              title="Host & Python"
+              title={t("panels:environment.host")}
               status={
-                <StatusBadge
-                  tone={capabilities.platform.is_x86_64 ? "ok" : "error"}
-                >
+                <StatusBadge tone={capabilities.platform.is_x86_64 ? "ok" : "error"}>
                   {capabilities.platform.is_x86_64
-                    ? "x86-64 target"
-                    : "unsupported arch"}
+                    ? "x86-64"
+                    : t("panels:environment.notReady")}
                 </StatusBadge>
               }
             >
-              <Row label="os">
+              <Row label={t("panels:environment.os")}>
                 {capabilities.platform.system} {capabilities.platform.release}
               </Row>
-              <Row label="architecture">
+              <Row label={t("panels:environment.architecture")}>
                 {capabilities.platform.architecture}
               </Row>
-              <Row label="machine">{capabilities.platform.machine}</Row>
-              <Row label="x86-64 check">
-                {capabilities.platform.is_x86_64 ? "yes" : "no"}
+              <Row label={t("panels:environment.machine")}>
+                {capabilities.platform.machine}
               </Row>
-              <Row label="hostname">{capabilities.platform.hostname}</Row>
-              <Row label="backend py">
+              <Row label={t("panels:environment.x86Check")}>
+                {capabilities.platform.is_x86_64
+                  ? t("panels:environment.yes")
+                  : t("panels:environment.no")}
+              </Row>
+              <Row label={t("panels:environment.hostname")}>
+                {capabilities.platform.hostname}
+              </Row>
+              <Row label={t("panels:environment.backendPy")}>
                 {capabilities.python.backend_version}
               </Row>
-              <Row label="gdb py">
+              <Row label={t("panels:environment.gdbPython")}>
                 {capabilities.python.gdb_embedded_version ?? "-"}
               </Row>
             </Card>
 
             <Card
-              title="Samples"
+              title={t("panels:environment.samples")}
               status={
                 <StatusBadge tone={capabilities.samples.count > 0 ? "ok" : "warn"}>
-                  {capabilities.samples.count} found
+                  {t("panels:environment.samplesFound", {
+                    count: capabilities.samples.count,
+                  })}
                 </StatusBadge>
               }
             >
@@ -245,23 +277,20 @@ export function EnvironmentPanel({
               </p>
               <ul className="space-y-1">
                 {samples.map((sample) => (
-                  <li
-                    key={sample.id}
-                    className="flex items-center justify-between gap-2"
-                  >
+                  <li key={sample.id} className="flex items-center justify-between gap-2">
                     <span className="truncate font-mono text-[11px] text-slate-300">
                       {sample.id}
                     </span>
                     <StatusBadge tone={sample.binary_exists ? "ok" : "warn"}>
                       {sample.binary_exists
                         ? formatBytes(sample.binary_size)
-                        : "not built"}
+                        : t("panels:environment.notBuilt")}
                     </StatusBadge>
                   </li>
                 ))}
                 {samples.length === 0 ? (
                   <li className="font-mono text-[11px] text-slate-600">
-                    no sample directories with demo.c
+                    {t("panels:environment.noSamples")}
                   </li>
                 ) : null}
               </ul>
@@ -271,7 +300,9 @@ export function EnvironmentPanel({
           {capabilities.warnings.length > 0 ? (
             <div className="rounded border border-amber-500/30 bg-amber-500/5 p-3">
               <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-300">
-                Warnings ({capabilities.warnings.length})
+                {t("panels:environment.warningsCount", {
+                  count: capabilities.warnings.length,
+                })}
               </h3>
               <ul className="mt-1 space-y-1">
                 {capabilities.warnings.map((warning) => (
@@ -286,14 +317,13 @@ export function EnvironmentPanel({
             </div>
           ) : (
             <div className="rounded border border-emerald-500/20 bg-emerald-500/5 p-3 text-[10px] text-emerald-300/80">
-              No warnings: GDB, MI3 and the embedded Python interpreter are all
-              usable.
+              {t("panels:environment.noWarnings")}
             </div>
           )}
 
           <details className="rounded border border-[#1e2635] bg-[#0a0e14] p-3">
             <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.14em] text-slate-500">
-              raw probe payload
+              {t("panels:environment.rawPayload")}
             </summary>
             <pre className="mt-2 max-h-64 overflow-auto font-mono text-[10px] leading-4 text-slate-400">
               {JSON.stringify(capabilities, null, 2)}
