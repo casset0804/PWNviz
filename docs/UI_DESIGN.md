@@ -23,7 +23,14 @@
 
 ---
 
-## 2. 画布布局（1920×1080 演示模式）
+## 2. 画布布局（1920×1080 演示模式，V1.4 起为栈中心设计）
+
+> **V1.4 变更**：三栏 26/56/18；栈图内部为居中列组
+> （地址标尺 160 | Diff Gutter 12 | 内存柱 320（≤360）| RSP/RBP 标记区 88），
+> 内存柱宽度固定、两侧留白；帧为柱内纵向段 + 小型函数名标签；
+> 底部教学面板移除，改为 Inspector Drawer（选中内存块时浮出）；
+> 唯一讲解 = 顶部 CurrentInstruction。以下 V1.3 描述保留作历史参考，
+> 与 V1.4 冲突处以本段为准。
 
 ```text
 ┌────────────────────────────────────────────────────────────────────┐
@@ -38,7 +45,8 @@
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-栈图内部横向分为四列：地址标尺 164px → 帧标签列 184px → 内存块区
+栈图内部横向分为五列：地址标尺 164px → **Diff Gutter 18px**（未归属
+变化标记，V1.3.2）→ 帧标签列 184px → 内存块区
 （自适应）→ 指针路由区（宽度随可见指针数动态计算：每条正交通道 18px，
 上限 12 条；无指针时 12px）。
 
@@ -88,7 +96,10 @@
 - 块边色按语义：变量 cyan / 参数 amber / 指针 sky / 字符串 emerald /
   聚合 violet / 保存的 RBP sky / 返回地址 rose / 未知虚线 / 不可读红虚线；
 - `conflict` 归属的块加 amber 外描边，`pin`（无大小证据）用虚线边框；
-- 变化字节：`MemoryChangeOverlay` 绿色高亮（460ms，可关）。
+- 变化字节（V1.3.2）：仅左缘 4px 竖向合并标记（`MemoryChangeOverlay`，
+  连续字节合并为一条，宽度 4px = 变化字节数 × pxPerByte），无横跨线、
+  无发光、不覆盖块；tooltip 与点击（Inspector 表格）携带
+  `before → after` 证据。
 
 ### 外部名称芯片（微型块）
 
@@ -165,6 +176,21 @@
   真实纵向范围内（V1.3.1 正交几何）、帧卡无重叠、页面无横向溢出、字体 ≥11px；
 - 数据全部来自真实 GDB 会话（`POST /api/v1/sessions` → launch → MI 单步），
   禁止 mock 内存数据。
+
+### V1.3.2 追加：diff 纯净度回归（`frontend/e2e/stackmap-diff.spec.ts`）
+
+| 文件 | 场景 |
+|---|---|
+| `stackmap-v1.3.2/01-single-byte.png` | 1 个变化字节 |
+| `stackmap-v1.3.2/02-eight-contiguous.png` | 8 个连续字节 → 一条合并竖标 |
+| `stackmap-v1.3.2/03-multi-range-changes.png` | 多段分离变化 |
+| `stackmap-v1.3.2/04-gutter-unattributed.png` | 未归属变化只进 Diff Gutter（DOM=快照奇偶校验） |
+| `stackmap-v1.3.2/05-inspector-before-after.png` | 点击标记打开 Address\|Before\|After 表格 |
+
+- 断言：栈图内不存在全宽绿色横线（计算样式扫描）、所有 diff 标记宽度
+  ≤6px、标记不与 RSP/RBP 芯片相交、1920×1080 无绿色线条噪声；
+- 纯函数：`groupMemoryChangesByAddress()`（连续地址合并、逐字节保留
+  before/after）+ `layoutChangeGroups()`。
 
 ### V1.3.1 追加：清晰度回归（`frontend/e2e/stackmap-clarity.spec.ts`）
 

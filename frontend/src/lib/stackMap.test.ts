@@ -10,6 +10,8 @@ import {
   addressTop,
   assignPointerLanes,
   buildRulerTicks,
+  groupMemoryChangesByAddress,
+  layoutChangeGroups,
   pointerLaneWidth,
   buildStackMap,
   fitFramePxPerByte,
@@ -852,5 +854,85 @@ describe("adaptive ruler ticks (V1.3.1)", () => {
     for (let index = 1; index < tops.length; index += 1) {
       expect(tops[index] - tops[index - 1]).toBeGreaterThanOrEqual(56);
     }
+  });
+});
+
+describe("memory change grouping (V1.3.2)", () => {
+  const change = (address: string, before = "00", after = "01") => ({ address, before, after });
+
+  it("merges contiguous addresses and keeps every before/after", () => {
+    const groups = groupMemoryChangesByAddress([
+      change("0x0000000000001000"),
+      change("0x0000000000001001", "00", "02"),
+      change("0x0000000000001002", "00", "03"),
+      change("0x0000000000001008", "00", "04"),
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toMatchObject({ start: "0x0000000000001000", end: "0x0000000000001003", count: 3 });
+    expect(groups[1]).toMatchObject({ start: "0x0000000000001008", end: "0x0000000000001009", count: 1 });
+    // Original per-byte evidence survives the merge.
+    expect(groups[0].changes.map((c) => c.after)).toEqual(["01", "02", "03"]);
+    expect(groups[1].changes[0].after).toBe("04");
+  });
+
+  it("tolerates unsorted input, duplicates-free single bytes and empty input", () => {
+    const unsorted = groupMemoryChangesByAddress([
+      change("0x0000000000002000"),
+      change("0x0000000000001000"),
+    ]);
+    expect(unsorted.map((g) => g.start)).toEqual(["0x0000000000001000", "0x0000000000002000"]);
+    expect(groupMemoryChangesByAddress([])).toEqual([]);
+    expect(groupMemoryChangesByAddress([change("0x0000000000001000")])).toHaveLength(1);
+  });
+
+  it("never fabricates entries: total bytes out == total bytes in", () => {
+    const input = Array.from({ length: 10 }, (_, i) =>
+      change(`0x000000000000${(0x3000 + i * 3).toString(16).padStart(4, "0")}`),
+    );
+    const groups = groupMemoryChangesByAddress(input);
+    expect(groups.reduce((total, g) => total + g.count, 0)).toBe(10);
+  });
+
+  it("lays out merged runs at exact byte rows (8 contiguous -> one mark)", () => {
+    const changes = Array.from({ length: 8 }, (_, i) =>
+      change(`0x00000000000019${(0x10 + i).toString(16)}`),
+    ); // 0x1910..0x1917, contiguous
+    const groups = groupMemoryChangesByAddress(changes);
+    expect(groups).toHaveLength(1);
+    const layouts = layoutChangeGroups(groups, "0x0000000000001a00", 10);
+    expect(layouts).toHaveLength(1);
+    expect(layouts[0].height).toBe(80); // 8 bytes x 10 px
+    // top = (0x1a00 - 0x1918) * 10
+    expect(layouts[0].top).toBe((0x1a00 - 0x1918) * 10);
+  });
+
+  it("keeps scattered bytes as independent marks", () => {
+    const changes = Array.from({ length: 8 }, (_, i) =>
+      change(`0x00000000000019${(i * 2).toString(16).padStart(2, "0")}`),
+    ); // stride 2 -> never contiguous
+    const groups = groupMemoryChangesByAddress(changes);
+    expect(groups).toHaveLength(8);
+    expect(layoutChangeGroups(groups, "0x0000000000001a00", 10)).toHaveLength(8);
+  });
+});
+
+describe("diff rendering does not move memory (V1.3.2)", () => {
+  it("changed bytes never alter block geometry or the address layout", () => {
+    const withDiff = makeSnapshot();
+    const withoutDiff: Snapshot = {
+      ...withDiff,
+      diff: { ...withDiff.diff, changed_bytes: [], changed_registers: [] },
+    };
+
+    const a = buildStackMap(withDiff);
+    const b = buildStackMap(withoutDiff);
+    expect(a.contentHeight).toBe(b.contentHeight);
+    expect(a.blocks.map((block) => [block.id, block.top, block.height])).toEqual(
+      b.blocks.map((block) => [block.id, block.top, block.height]),
+    );
+    // The diff only adds change evidence, not geometry.
+    expect(a.changeMarks.length).toBeGreaterThan(0);
+    expect(b.changeMarks).toHaveLength(0);
   });
 });

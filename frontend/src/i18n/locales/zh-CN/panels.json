@@ -396,7 +396,9 @@
     "hoverPointer": "指向",
     "assignmentWithinFrame": "归属已验证：地址位于该帧局部区域（叶函数红区，基址下方）",
     "showAllPointers": "全部指针",
-    "showAllPointersTitle": "显示全部真实指针关系（默认只显示与选中内存块相关的指针）"
+    "showAllPointersTitle": "显示全部真实指针关系（默认只显示与选中内存块相关的指针）",
+    "unattributedChanges": "未归属变化",
+    "frameOffsetTitle": "相对帧基址 RBP 的真实偏移"
   },
   "source": {
     "title": "源码",

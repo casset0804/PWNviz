@@ -60,6 +60,53 @@ V1.3 不改调试链路、不加 mock；它解决 V1.2 遗留的三个教学可�
 
 ---
 
+## 1.4 V1.4 增量：以栈为中心的 UI 重设计（2026-11-06）
+
+V1.4 重排演示模式的空间结构：栈内存从横向大矩形变成居中的纵向内存柱，
+并去除重复讲解与常驻底部面板。不改后端、不改真实地址/大小/间隔。
+
+- **PresentationWorkbench**：`minmax(340px,26fr) / minmax(620px,56fr) /
+  minmax(260px,18fr)` 三栏；源码面板 ≥340px 保证地址/字节/助记符/操作数
+  可读；<1280px 寄存器自动折叠；
+- **列组几何**：标尺 160（左对齐地址）+ Diff Gutter 12 + 内存柱 320
+  （上限 360）+ RSP/RBP 标记区 88 = 580px，工作区内居中，两侧留白；
+  内存块/帧/带区全部限制在柱内（Playwright 断言无出柱）；
+- **StackFrameCard**：纵向段 + 顶部小型函数名标签（当前帧青/调用者次级/
+  未验证琥珀，点击定位）；微变量芯片叠柱左缘；
+- **RSP/RBP**：右置标记区，短箭头指向真实地址行，点击定位；
+  RSP===RBP 标签错开而锚点不动；默认无跨柱横线（developer/点击临时显示）；
+- **讲解去重**：删除 StepTeachingPanel，CurrentInstruction 为唯一讲解
+  （一句实测结果）；Inspector Drawer 承接内存 diff/选中块/字节/QWORD/
+  ASCII/指针目标/before-after，选中即浮出、可关闭；
+- **帧内偏移**：`frameOffset` 字段（如 rbp-0x14）显示在变量块与 Inspector；
+- **配色**：变量统一绿色系、返回地址柔红、saved RBP 蓝、未知深灰、
+  当前帧青；大面积纯色、无网格/纹理/多重描边；
+- **验证**：单测 78 passed；typecheck/build 通过；Playwright 四套件
+  **25/25**（新增 `stackmap-v14.spec.ts` 六场景），截图 `docs/assets/v1.4/`；
+- 仍未解决：hover 卡片在极窄容器下可能覆盖柱边缘（已做左侧回退）；
+  20/60 字节级 diff 场景仍以单测+实测检查点覆盖（见 1.3.2）。
+
+---
+
+## 1.3.2 V1.3.2 增量：移除全宽内存 diff 横线（2026-11-06）
+
+- `MemoryChangeOverlay`：连续变化字节合并为块左缘 4px 竖标
+  （高度=字节数×缩放），删除 `left-[5px] right-0 h-[2px]` 全宽线；
+  tooltip/点击携带逐字节 before/after；
+- `StackMapCanvas`：删除 `changedOutsideBlocks` 全宽绿线；新增 18px
+  Diff Gutter（标尺与帧标签列之间），未归属变化只画 4px 竖标 +
+  头部计数徽章，点击进 Inspector 表格（Address|Before|After）；
+- 纯函数 `groupMemoryChangesByAddress()` / `layoutChangeGroups()`
+  （连续合并、逐字节证据保留、布局不受 diff 影响——单测覆盖）；
+- 顺带修复：`stack-map-unframed` 包装层拦截帧内点击（pointer-events）；
+- Playwright `stackmap-diff.spec.ts` 5/5：无全宽绿线（样式扫描）、
+  标记 ≤6px、不与寄存器芯片相交、gutter DOM=快照奇偶校验、
+  Inspector 表格；截图 `docs/assets/stackmap-v1.3.2/`；
+- 注：单步 in-window diff 天然 ≤ 帧内写入（约 8–16 字节/步），
+  "20/60 字节"场景由单测的分组纯函数覆盖，E2E 使用实测检查点。
+
+---
+
 ## 1.3.1 V1.3.1 增量：StackMap 视觉清晰度与指针路由修复（2026-11-06）
 
 V1.3.1 只修复图形化栈视图的混乱、细线过多和指针箭头重叠问题；

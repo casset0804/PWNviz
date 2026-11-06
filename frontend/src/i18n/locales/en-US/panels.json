@@ -396,7 +396,9 @@
     "hoverPointer": "Points to",
     "assignmentWithinFrame": "Ownership verified: the address lies in the frame's local region (leaf-function red zone)",
     "showAllPointers": "All pointers",
-    "showAllPointersTitle": "Draw every real pointer relation (default: only those touching the selected block)"
+    "showAllPointersTitle": "Draw every real pointer relation (default: only those touching the selected block)",
+    "unattributedChanges": "Unattributed changes",
+    "frameOffsetTitle": "Real offset from the frame base (RBP)"
   },
   "source": {
     "title": "Source",

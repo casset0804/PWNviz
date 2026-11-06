@@ -1,6 +1,11 @@
 import { useTranslation } from "react-i18next";
 
-import { STACK_MAP_MICRO_BLOCK_PX, type PointerLink, type StackMapBlock } from "../../lib/stackMap";
+import {
+  STACK_MAP_MICRO_BLOCK_PX,
+  type MemoryChangeGroup,
+  type PointerLink,
+  type StackMapBlock,
+} from "../../lib/stackMap";
 import { MemoryChangeOverlay } from "./MemoryChangeOverlay";
 import { VariableBlock } from "./VariableBlock";
 
@@ -11,9 +16,10 @@ interface MemoryBlockProps {
   selected: boolean;
   highlighted: boolean;
   pointerTarget?: boolean;
-  rightInset?: number;
   /** Current map scale; change marks are positioned at exact byte rows. */
   pxPerByte: number;
+  /** Open the Inspector on a clicked change run. */
+  onSelectChangeGroup?: (group: MemoryChangeGroup) => void;
   snapshotId: number;
   animationsEnabled: boolean;
   reducedMotion: boolean;
@@ -24,34 +30,23 @@ interface MemoryBlockProps {
   showLabel?: boolean;
 }
 
-function variableTone(block: StackMapBlock): string {
-  const node = block.variable;
-  if (node?.is_argument) {
-    return "border-l-amber-400/80 bg-[#1b1710]/95";
-  }
-  if (node?.kind === "pointer") {
-    return "border-l-sky-400/80 bg-[#0b1823]/95";
-  }
-  if (node?.kind === "string") {
-    return "border-l-emerald-400/80 bg-[#0a1a17]/95";
-  }
-  if (node?.kind === "array" || node?.kind === "struct" || node?.kind === "union") {
-    return "border-l-violet-400/80 bg-[#13121f]/95";
-  }
-  return "border-l-cyan-400/70 bg-[#0d1722]/95";
+function variableTone(): string {
+  // V1.4 palette: one green family for all variables; kind/argument
+  // differences are carried by small chips inside the block, not extra hues.
+  return "border-l-emerald-400/90 bg-[#0b1810]";
 }
 
 function blockClasses(block: StackMapBlock): string {
   if (block.kind === "variable") {
     // One left accent = the single main separator. Ownership state is carried
     // by the badge/tooltip, not by extra outlines around the block.
-    return `${variableTone(block)} ${block.pin ? "border-b border-dashed border-b-[#3a4b5e]" : ""}`;
+    return `${variableTone()} ${block.pin ? "border-b border-dashed border-b-[#3a4b5e]" : ""}`;
   }
   if (block.kind === "saved-rbp") {
-    return "border-l-sky-400 bg-[#0c1c2c]";
+    return "border-l-sky-400 bg-[#0c1626]";
   }
   if (block.kind === "return-address") {
-    return "border-l-rose-400 bg-[#1c1119]";
+    return "border-l-rose-400/90 bg-[#1c1016]";
   }
   // Flat band fills (no dashed/dotted boxes, no repeating textures).
   if (block.kind === "unreadable") {
@@ -73,8 +68,8 @@ export function MemoryBlock({
   selected,
   highlighted,
   pointerTarget = false,
-  rightInset = 76,
   pxPerByte,
+  onSelectChangeGroup,
   snapshotId,
   animationsEnabled,
   reducedMotion,
@@ -134,7 +129,7 @@ export function MemoryBlock({
       onMouseLeave={() => onHover(null)}
       onFocus={() => onHover(block)}
       onBlur={() => onHover(null)}
-      className={`group absolute left-2 overflow-hidden rounded-sm border-l-[3px] px-2.5 outline-none transition-[box-shadow,background-color] duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300 ${blockClasses(
+      className={`group pointer-events-auto absolute inset-x-0 overflow-hidden rounded-sm border-l-[3px] px-2.5 outline-none transition-[box-shadow,background-color] duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300 ${blockClasses(
         block,
       )} ${
         selected
@@ -145,7 +140,7 @@ export function MemoryBlock({
               ? "z-10 ring-1 ring-inset ring-sky-400/45"
               : "z-10"
       }`}
-      style={{ top: block.top, height, right: rightInset }}
+      style={{ top: block.top, height }}
     >
       {changed ? (
         <MemoryChangeOverlay
@@ -155,6 +150,7 @@ export function MemoryBlock({
           pxPerByte={pxPerByte}
           animationsEnabled={animationsEnabled}
           reducedMotion={reducedMotion}
+          onSelectChangeGroup={onSelectChangeGroup}
         />
       ) : null}
 

@@ -183,6 +183,15 @@ unresolved = 证据不足（声明的帧不在窗口 / 无 frame_level / 地址�
 **课堂投屏模式**：`debugStore.projectionMode`（`pwnviz.projection` 持久化）；
 隐藏 StatusBar/会话 ID/开发模式入口，教学区收成单行；演示面字号 ≥12px。
 
+**以栈为中心的列组几何（V1.4）**：`STACK_MAP_COLUMN_GROUP` =
+标尺 160 + Diff Gutter 12 + 内存柱 320（上限 360）+ 标记区 88 = 580px，
+在 StackMap 工作区内居中（`groupLeft = max(8, (contentWidth-580)/2)`）；
+真实字节几何只映射高度，宽度固定。帧 = 柱内纵向段；函数名/微变量芯片为
+柱上覆盖标签；指针箭头路由到列组右侧留白（lane 数随可用宽度自适应）；
+RSP/RBP 标记在柱右侧 88px 区，短箭头指向真实行；Inspector Drawer
+（选中内存块时浮出）承载原底部面板的全部细节；
+PresentationWorkbench 网格 26/56/18，演示模式唯一讲解为 CurrentInstruction。
+
 **指针正交路由（V1.3.1）**：`assignPointerLanes()` 在过滤掉 NULL/窗外/不可读
 链接**之后**按 Y 序分配连续 0..n-1 通道；`pointerLaneWidth(n)` 按可见数动态
 计算路由宽度（18px/通道，上限 12 条）；`PointerArrow` 为正交折线
@@ -201,6 +210,12 @@ developer 8/16/32B 且次刻度仅在 ≥14px 时生成；刻度 Y 仍走 `addre
 **逐字节变化标记（V1.3.1）**：`MemoryChangeOverlay` 按 `diff.changed_bytes`
 真实地址在块内逐字节定位左缘标记，tooltip 携带 `before → after`；变量显示
 changed count；底部 Inspector 列出选中块的 before/after；不再整块覆盖。
+
+**Diff Gutter 与合并竖标（V1.3.2）**：`groupMemoryChangesByAddress()` 把
+`diff.changed_bytes` 按连续地址合并（每字节 before/after 保留）；
+块内变化 = 左缘 4px 合并竖标（`MemoryChangeOverlay`）；未归属变化 =
+标尺旁 18px Diff Gutter 里的 4px 竖标（点击 → Inspector 的
+Address|Before|After 表格）；全宽横线绘制方式已删除。
 
 **视觉回归**：两个 Playwright 套件驱动真实 GDB——
 `frontend/e2e/presentation.visual.spec.ts`（教学检查点 7 项，截图

@@ -229,10 +229,9 @@ async function assertCommon(page: import("@playwright/test").Page, snapshot: Sna
   // f) frame titles and variable blocks: no clipped text anywhere
   const clips = await page.evaluate(() => {
     const offenders: string[] = [];
-    for (const plate of document.querySelectorAll<HTMLElement>("[data-testid=stack-frame-plate]")) {
-      const heading = plate.querySelector("h3");
-      if (heading && heading.scrollHeight > heading.clientHeight + 1) {
-        offenders.push(`plate:${heading.textContent?.slice(0, 20)}`);
+    for (const chip of document.querySelectorAll<HTMLElement>("[data-testid=stack-frame-chip]")) {
+      if (chip.scrollWidth - chip.clientWidth > 2 || chip.scrollHeight - chip.clientHeight > 2) {
+        offenders.push(`frame-chip:${chip.textContent?.slice(0, 20)}`);
       }
     }
     for (const block of document.querySelectorAll<HTMLElement>("[data-testid=stack-map-block]")) {

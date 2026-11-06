@@ -1,6 +1,10 @@
 import { useTranslation } from "react-i18next";
 
-import { STACK_MAP_FRAME_LABEL_WIDTH, STACK_MAP_RULER_WIDTH } from "../../lib/stackMap";
+import {
+  STACK_MAP_MARKER_GUTTER,
+  STACK_MAP_SPINE_LEFT,
+  STACK_MAP_SPINE_WIDTH,
+} from "../../lib/stackMap";
 
 interface StackPointerMarkerProps {
   kind: "RSP" | "RBP";
@@ -9,28 +13,24 @@ interface StackPointerMarkerProps {
   changed: boolean;
   reducedMotion: boolean;
   onFocus: (address: string) => void;
-  /** presentation = chip + stub, full guide only on demand; developer = full line. */
+  /** presentation = chip + short arrow; developer adds a spine-wide guide. */
   variant: "presentation" | "developer";
-  /**
-   * Vertical nudge for the chip ONLY (pixels). When RSP and RBP coincide —
-   * leaf functions keep RSP at the frame base — the two chips would overlap
-   * and block each other's clicks, so they shift apart while both stub and
-   * guide stay pinned to the exact address row.
-   */
+  /** Vertical nudge for the chip only (RSP === RBP leaf functions). */
   chipOffsetY?: number;
-  /** True while the temporary full-width guide is shown (presentation mode). */
+  /** True while the temporary spine-wide guide is shown. */
   guideVisible: boolean;
   onToggleGuide: () => void;
 }
 
 /**
- * Exact-address marker.
+ * Right-hand locator for one register (V1.4).
  *
- * The chip lives in the frame-label gutter and is positioned from the same
- * addressTop() transform as the byte blocks. Presentation mode keeps the map
- * clean: only a chip with a short stub arrow — the full-width hairline appears
- * temporarily when the user clicks the marker (or the register card), and the
- * developer variant keeps the permanent reference line.
+ * The chip lives in the marker gutter to the RIGHT of the memory spine; a
+ * short arrow points LEFT at the exact address row on the spine. No line ever
+ * crosses the memory column by default — the developer variant (or an explicit
+ * click) may show a spine-wide guide, which still stops at the spine edges.
+ * The chip may shift vertically when RSP === RBP, but the arrow anchor stays
+ * pinned to the real address row.
  */
 export function StackPointerMarker({
   kind,
@@ -51,6 +51,10 @@ export function StackPointerMarker({
     ? "border-[#f6ad55]/70 bg-[#2a1d0e] text-[#ffd79b]"
     : "border-[#7db8e8]/70 bg-[#101f2d] text-[#b9d9f2]";
   const showFullGuide = variant === "developer" || guideVisible;
+  // Chip occupies most of the marker gutter; a 14 px arrow bridge reaches the
+  // spine's right edge, where the anchor dot marks the exact address row.
+  const chipLeft = STACK_MAP_SPINE_LEFT + STACK_MAP_SPINE_WIDTH + 14;
+  const chipWidth = STACK_MAP_MARKER_GUTTER - 18;
 
   return (
     <div
@@ -65,6 +69,22 @@ export function StackPointerMarker({
       data-variant={variant}
       data-guide={showFullGuide ? "true" : "false"}
     >
+      {/* Arrow bridge: from the chip's left edge to the spine's right edge. */}
+      <div
+        aria-hidden="true"
+        className="absolute h-[2px] -translate-y-1/2"
+        style={{
+          left: STACK_MAP_SPINE_LEFT + STACK_MAP_SPINE_WIDTH,
+          width: 14,
+          background: color,
+        }}
+      >
+        <span
+          className="absolute -left-[5px] top-1/2 h-2 w-2 -translate-y-1/2 rotate-45"
+          style={{ background: color }}
+        />
+      </div>
+
       <button
         type="button"
         onClick={() => {
@@ -72,45 +92,28 @@ export function StackPointerMarker({
           onToggleGuide();
         }}
         title={t(orange ? "panels:stackMap.focusRsp" : "panels:stackMap.focusRbp")}
-        className={`pointer-events-auto absolute flex h-[44px] -translate-y-1/2 flex-col justify-center rounded border border-l-[3px] px-2 font-mono shadow-[0_1px_6px_rgba(0,0,0,0.4)] transition-colors hover:brightness-110 ${tone} ${
+        className={`pointer-events-auto absolute flex h-[44px] -translate-y-1/2 flex-col justify-center rounded border px-2 font-mono shadow-[0_1px_6px_rgba(0,0,0,0.4)] transition-colors hover:brightness-110 ${tone} ${
           changed ? "stack-marker-changed" : ""
         }`}
-        style={{ left: 6, width: STACK_MAP_RULER_WIDTH - 12, top: chipOffsetY }}
+        style={{ left: chipLeft, width: chipWidth, top: chipOffsetY }}
       >
-        <span className="text-[14px] font-bold leading-4 tracking-[0.08em]">{kind}</span>
-        <span className="truncate text-[11.5px] tabular-nums leading-4 opacity-90">
+        <span className="text-[15px] font-bold leading-4 tracking-[0.08em]">{kind}</span>
+        <span className="truncate text-[11px] tabular-nums leading-4 opacity-90">
           {address}
         </span>
       </button>
-      {/* Short stub arrow: points at the exact byte row without crossing the
-          whole memory area. The full guide is opt-in (or developer mode). */}
-      <div
-        className="absolute h-px opacity-60"
-        style={{
-          left: STACK_MAP_RULER_WIDTH - 4,
-          width: STACK_MAP_FRAME_LABEL_WIDTH + 10,
-          background: `linear-gradient(90deg, ${color} 0%, ${color} 70%, transparent 100%)`,
-        }}
-        aria-hidden="true"
-      />
+
       {showFullGuide ? (
-        <>
-          <div
-            className="absolute h-px -translate-y-1/2"
-            style={{
-              left: STACK_MAP_RULER_WIDTH + STACK_MAP_FRAME_LABEL_WIDTH,
-              right: 0,
-              background: `linear-gradient(90deg, ${color} 0%, ${color} 78%, transparent 100%)`,
-            }}
-            aria-hidden="true"
-            data-testid={orange ? "stack-map-rsp-guide" : "stack-map-rbp-guide"}
-          >
-            <span
-              className="absolute -left-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45"
-              style={{ background: color }}
-            />
-          </div>
-        </>
+        <div
+          aria-hidden="true"
+          className="absolute h-[2px] -translate-y-1/2"
+          style={{
+            left: STACK_MAP_SPINE_LEFT,
+            width: STACK_MAP_SPINE_WIDTH,
+            background: `linear-gradient(90deg, transparent 0%, ${color} 12%, ${color} 88%, transparent 100%)`,
+          }}
+          data-testid={orange ? "stack-map-rsp-guide" : "stack-map-rbp-guide"}
+        />
       ) : null}
     </div>
   );

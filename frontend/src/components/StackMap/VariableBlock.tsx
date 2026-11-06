@@ -120,10 +120,14 @@ export function VariableBlock({
   // MemoryBlock gates micro blocks (< 26 px): VariableBlock only renders when
   // its content provably fits inside the real byte extent. Layout budgets are
   // measured, not guessed:
-  //   < 52 px (an int at actual scale)  -> one compact line only;
-  //   >= 52 px                          -> name/value + type/address/size line;
-  //   >= 64 px                          -> additionally the pointer badge row.
-  const compact = block.height < 52;
+  //   < 64 px (an int at actual scale)  -> one compact line only;
+  //   >= 64 px                          -> name/value + type/address/size line
+  //                                        (the meta row may wrap at the
+  //                                        spine's 320 px width);
+  //   >= 96 px                          -> additionally the pointer badge row;
+  //                                        narrower blocks use the hover card
+  //                                        and the Inspector Drawer instead.
+  const compact = block.height < 64;
   const value = node.value;
   const displayedValue =
     node.kind === "string" && node.string_value
@@ -139,7 +143,7 @@ export function VariableBlock({
   if (compact) {
     return (
       <span className="flex min-w-0 items-center gap-2">
-        <span className="shrink-0 truncate text-[13px] font-semibold text-[#e6eef7]">
+        <span className="shrink-0 truncate text-[15px] font-semibold text-[#e6eef7]">
           {node.name}
         </span>
         <OwnershipBadge block={block} />
@@ -194,6 +198,14 @@ export function VariableBlock({
           <span className="shrink-0 font-mono tabular-nums text-[#a7b8c9]">
             {block.start}
           </span>
+          {block.frameOffset ? (
+            <span
+              className="shrink-0 rounded-[2px] border border-[#2b3d51] bg-[#0c1520] px-1 font-mono text-[11px] leading-4 text-[#8fa3b8]"
+              title={t("panels:stackMap.frameOffsetTitle")}
+            >
+              rbp{block.frameOffset}
+            </span>
+          ) : null}
           <span className="shrink-0 text-[#6f8298]">{sizeText}</span>
           {block.sizeSource === "abi" ? (
             <span
@@ -211,7 +223,7 @@ export function VariableBlock({
           ) : null}
         </span>
 
-      {link && block.height >= 64 ? (
+      {link && block.height >= 96 ? (
         <span className="flex min-w-0 items-center gap-2">
           <span className={`truncate rounded-sm border px-1.5 py-0.5 text-[12.5px] ${badge?.tone}`}>
             {badge?.text} · {link.targetAddress}

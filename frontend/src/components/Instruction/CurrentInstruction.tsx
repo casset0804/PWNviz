@@ -125,16 +125,11 @@ export function CurrentInstruction() {
             {matched ? t("panels:instruction.verified") : t("panels:instruction.unverified")}
           </span>
         </div>
+        {/* V1.4: exactly ONE concise verified line here — the Inspector Drawer
+            (on selection) and DeveloperWorkbench's BottomDock carry details. */}
         <div className="truncate text-[15px] font-medium text-[#dbeaf7]" title={explanation.headline}>
           {previousSnapshot ? explanation.headline : t("panels:instruction.noPrevious")}
         </div>
-        {previousSnapshot && explanation.lines[0] ? (
-          <div className="line-clamp-2 text-[13px] leading-5 text-[#9db0c4]">
-            {explanation.lines[0]}
-          </div>
-        ) : (
-          <div className="text-[13px] text-[#7f93a8]">{t("panels:instruction.stepHint")}</div>
-        )}
       </div>
     </section>
   );

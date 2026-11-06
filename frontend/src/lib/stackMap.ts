@@ -62,12 +62,120 @@ export const STACK_MAP_MICRO_BLOCK_PX = 26;
 export const STACK_MAP_POINTER_LANE = 18;
 /** Hard cap on simultaneously drawn routing lanes (keeps the map usable). */
 export const STACK_MAP_MAX_POINTER_LANES = 12;
-/** The address ruler's width. */
-export const STACK_MAP_RULER_WIDTH = 164;
-/** The frame-label column that sits between the ruler and the memory blocks. */
-export const STACK_MAP_FRAME_LABEL_WIDTH = 184;
+/** The address ruler's width (left-aligned real addresses). */
+export const STACK_MAP_RULER_WIDTH = 160;
+/**
+ * Dedicated diff gutter between the address ruler and the memory spine.
+ * Unattributed memory changes render as small markers here and are never
+ * allowed to stretch across the memory area.
+ */
+export const STACK_MAP_DIFF_GUTTER_WIDTH = 12;
+/**
+ * The memory spine: a fixed-width vertical column. Real byte geometry maps to
+ * its HEIGHT only — the width never stretches with the container, so the map
+ * reads as a stack column instead of a full-screen rectangle.
+ */
+export const STACK_MAP_SPINE_WIDTH = 320;
+/** Hard upper bound for the spine width (visual acceptance limit). */
+export const STACK_MAP_SPINE_MAX_WIDTH = 360;
+/** Right-hand gutter holding the RSP/RBP locator chips and arrows. */
+export const STACK_MAP_MARKER_GUTTER = 88;
+/** Left edge of the spine inside the centered column group. */
+export const STACK_MAP_SPINE_LEFT = STACK_MAP_RULER_WIDTH + STACK_MAP_DIFF_GUTTER_WIDTH;
+/** Left edge of the marker gutter inside the column group. */
+export const STACK_MAP_MARKER_LEFT = STACK_MAP_SPINE_LEFT + STACK_MAP_SPINE_WIDTH;
+/** Total width of the centered column group (ruler | gutter | spine | markers). */
+export const STACK_MAP_COLUMN_GROUP = STACK_MAP_MARKER_LEFT + STACK_MAP_MARKER_GUTTER;
 /** Safety cap: a snapshot never needs more than a handful of drawn frames. */
 export const MAX_RENDERED_FRAMES = 6;
+
+export interface MemoryChangeGroup {
+  /** First changed address (inclusive, formatted). */
+  start: string;
+  /** End of the changed run (exclusive, formatted). */
+  end: string;
+  /** Number of changed bytes in the run. */
+  count: number;
+  /**
+   * The original diff entries, sorted by address — before/after values are
+   * preserved per byte and never aggregated away.
+   */
+  changes: MemoryChange[];
+}
+
+/**
+ * Merge byte-level diff entries into runs of contiguous addresses.
+ *
+ * `0x1000/0x1001/0x1002 + 0x1008` becomes one group `[0x1000, 0x1003)` and one
+ * single-byte group `[0x1008, 0x1009)`. Every original entry keeps its own
+ * before/after; grouping only affects the visual merge, never the data.
+ */
+export function groupMemoryChangesByAddress(changes: MemoryChange[]): MemoryChangeGroup[] {
+  const parsed = changes
+    .map((change) => ({ change, address: parseAddress(change.address) }))
+    .filter((entry): entry is { change: MemoryChange; address: bigint } => entry.address !== null)
+    .sort((left, right) => (left.address < right.address ? -1 : left.address > right.address ? 1 : 0));
+
+  const groups: MemoryChangeGroup[] = [];
+  let current: { start: bigint; end: bigint; changes: MemoryChange[] } | null = null;
+  const flush = (): void => {
+    if (current) {
+      groups.push({
+        start: formatAddress(current.start),
+        end: formatAddress(current.end),
+        count: current.changes.length,
+        changes: current.changes,
+      });
+    }
+  };
+  for (const entry of parsed) {
+    if (current && entry.address === current.end) {
+      current.end = entry.address + 1n;
+      current.changes.push(entry.change);
+    } else {
+      flush();
+      current = { start: entry.address, end: entry.address + 1n, changes: [entry.change] };
+    }
+  }
+  flush();
+  return groups;
+}
+
+export interface ChangeGroupLayout {
+  group: MemoryChangeGroup;
+  /** Top edge relative to the reference address's own row (pixels). */
+  top: number;
+  /** Merged run height in pixels (at least 2 so a single byte stays visible). */
+  height: number;
+}
+
+/**
+ * Lay out merged change groups under a reference address (the block's
+ * exclusive end, or the window end for the diff gutter). The geometry is the
+ * same addressTop() transform: a run of N bytes spans exactly N × pxPerByte.
+ */
+export function layoutChangeGroups(
+  groups: MemoryChangeGroup[],
+  topAddressExclusive: string,
+  pxPerByte: number,
+): ChangeGroupLayout[] {
+  const topAddress = parseAddress(topAddressExclusive);
+  if (topAddress === null) return [];
+  const layouts: ChangeGroupLayout[] = [];
+  for (const group of groups) {
+    const start = parseAddress(group.start);
+    const end = parseAddress(group.end);
+    if (start === null || end === null) continue;
+    const top = Number(topAddress - end) * pxPerByte;
+    if (top < 0) continue;
+    layouts.push({
+      group,
+      top,
+      height: Math.max(2, Number(end - start) * pxPerByte),
+    });
+  }
+  return layouts.sort((left, right) => left.top - right.top);
+}
 
 /**
  * Routing-area width for the given number of *visible* pointer links. Lanes
@@ -316,6 +424,11 @@ export interface StackMapBlock {
   /** Ownership evidence for variable blocks; null for bookkeeping bands. */
   assignment: VariableAssignmentState | null;
   assignmentReason: VariableAssignmentReason | null;
+  /**
+   * Signed offset from the owning frame's base (e.g. "-0x14" for a local at
+   * rbp-0x14, "+0x0" for the saved RBP slot). Null when no verified base.
+   */
+  frameOffset: string | null;
 }
 
 export interface StackFrameExtent {
@@ -998,9 +1111,14 @@ function blockFromPlacement(
   changedByAddress: Map<string, MemoryChange>,
   map: ByteMap,
   pxPerByte: number,
+  frameBase: bigint | null,
 ): StackMapBlock {
   const node = placement.node;
   const top = yFor(placement.end, windowEnd, pxPerByte) - frameTopPx;
+  const frameOffset =
+    frameBase !== null && frameBase !== 0n
+      ? formatSignedOffset(placement.start - frameBase)
+      : null;
   const changedBytes: MemoryChange[] = [];
   for (const change of changedByAddress.values()) {
     const address = parseAddress(change.address);
@@ -1032,7 +1150,13 @@ function blockFromPlacement(
     pin: placement.size === null,
     overlaps: false,
     ...assignmentFor(placement),
+    frameOffset,
   };
+}
+
+/** Format a signed byte offset the way teaching UIs read it: "-0x14". */
+export function formatSignedOffset(offset: bigint): string {
+  return offset < 0n ? `-0x${(-offset).toString(16)}` : `+0x${offset.toString(16)}`;
 }
 
 /** Subtract known byte ranges from a frame and return the remaining gaps. */
@@ -1093,6 +1217,7 @@ function frameUnknownBlocks(
       overlaps: false,
       assignment: null,
       assignmentReason: null,
+      frameOffset: formatSignedOffset(gap.start - frame.base),
     });
     unknownRanges.push({
       start: formatAddress(gap.start),
@@ -1222,7 +1347,7 @@ export function buildStackMap(
   // before V1.3.
   const unframedBlocks = annotated
     .filter((placement) => placement.geometricFrameLevel === null)
-    .map((placement) => blockFromPlacement(placement, 0, windowEnd, changedByAddress, map, scale))
+    .map((placement) => blockFromPlacement(placement, 0, windowEnd, changedByAddress, map, scale, null))
     .sort((left, right) => left.top - right.top);
 
   const allBlocks = [...frames.flatMap((frame) => frame.blocks), ...unframedBlocks];
@@ -1254,6 +1379,7 @@ export function buildStackMap(
       overlaps: false,
       assignment: null,
       assignmentReason: null,
+      frameOffset: null,
     };
   }
 
@@ -1291,6 +1417,7 @@ export function buildStackMap(
         overlaps: false,
         assignment: null,
         assignmentReason: null,
+        frameOffset: null,
       };
     }
   }
@@ -1392,6 +1519,7 @@ function makeFrame(
         overlaps: false,
         assignment: null,
         assignmentReason: null,
+        frameOffset: frame.verified && frame.base !== 0n ? "+0x0" : null,
       };
       blocks.push(savedBlock);
       knownRanges.push({ start: savedStart, end: savedEnd });
@@ -1423,6 +1551,7 @@ function makeFrame(
         overlaps: false,
         assignment: null,
         assignmentReason: null,
+        frameOffset: frame.verified && frame.base !== 0n ? "+0x8" : null,
       };
       blocks.push(returnBlock);
       knownRanges.push({ start: returnStart, end: returnEnd });
@@ -1430,7 +1559,15 @@ function makeFrame(
   }
 
   for (const placement of own) {
-    const block = blockFromPlacement(placement, top, windowEnd, changedByAddress, map, pxPerByte);
+    const block = blockFromPlacement(
+      placement,
+      top,
+      windowEnd,
+      changedByAddress,
+      map,
+      pxPerByte,
+      frame.verified ? frame.base : null,
+    );
     blocks.push(block);
     knownRanges.push({ start: placement.start, end: placement.end });
   }

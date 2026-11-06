@@ -36,6 +36,14 @@ export interface Snapshot {
   variables: VariableNode[];
   variables_available: boolean;
   stack: { range_start: string | null; range_end: string | null };
+  diff: SnapshotDiff;
+}
+
+export interface SnapshotDiff {
+  previous_snapshot_id: number | null;
+  changed_registers: string[];
+  changed_bytes: Array<{ address: string; before: string | null; after: string | null }>;
+  window_changed: boolean;
 }
 
 export interface SessionInfo {

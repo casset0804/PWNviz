@@ -30,26 +30,20 @@ async function assertVisualContract(page: Page, snapshot: Snapshot): Promise<voi
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth), { timeout: 5_000 })
     .toBeLessThanOrEqual(1922);
 
-  // 2. stack-frame title plates: the name must not be clipped
-  const plates = await page.evaluate(() => {
-    return [...document.querySelectorAll<HTMLElement>("[data-testid=stack-frame-plate]")].map(
-      (plate) => {
-        const heading = plate.querySelector("h3");
-        return {
-          name: heading?.textContent ?? "",
-          clientHeight: heading?.clientHeight ?? 0,
-          scrollHeight: heading?.scrollHeight ?? 0,
-          plateHeight: plate.clientHeight,
-        };
-      },
+  // 2. stack-frame name chips (V1.4): independent tags, never clipped
+  const chips = await page.evaluate(() => {
+    return [...document.querySelectorAll<HTMLElement>("[data-testid=stack-frame-chip]")].map(
+      (chip) => ({
+        name: chip.querySelector("span:nth-child(2)")?.textContent ?? "",
+        dw: chip.scrollWidth - chip.clientWidth,
+        dh: chip.scrollHeight - chip.clientHeight,
+      }),
     );
   });
-  expect(plates.length).toBeGreaterThan(0);
-  for (const plate of plates) {
-    // line-clamp-2 is the deliberate plate budget; anything shorter than two
-    // lines (all teaching names) must fit with zero overflow.
-    expect.soft(plate.scrollHeight, `plate text "${plate.name}" clipped vertically`).toBeLessThanOrEqual(plate.clientHeight + 1);
-    expect.soft(plate.plateHeight, "plate must keep its fixed height").toBeGreaterThanOrEqual(80);
+  expect(chips.length).toBeGreaterThan(0);
+  for (const chip of chips) {
+    expect.soft(chip.dw, `frame chip "${chip.name}" clipped horizontally`).toBeLessThanOrEqual(2);
+    expect.soft(chip.dh, `frame chip "${chip.name}" clipped vertically`).toBeLessThanOrEqual(2);
   }
 
   // 3. variable blocks: no text may be cut off, micro blocks carry no text
@@ -76,7 +70,7 @@ async function assertVisualContract(page: Page, snapshot: Snapshot): Promise<voi
 
   // 4. gutter chips must not clip their label
   const chipClips = await page.evaluate(() =>
-    [...document.querySelectorAll<HTMLElement>("[data-testid=stack-frame-gutter-chip]")].map(
+    [...document.querySelectorAll<HTMLElement>("[data-testid=stack-frame-var-chip]")].map(
       (chip) => ({ label: chip.textContent ?? "", dw: chip.scrollWidth - chip.clientWidth }),
     ),
   );
@@ -307,8 +301,11 @@ test.describe("presentation visual regression (real GDB)", () => {
     await openSession(page, session.session_id);
     await page.getByTestId("projection-toggle").click();
     await expect(page.getByTestId("projection-toggle")).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByTestId("teaching-panel")).toHaveAttribute("data-state", "projection");
+    // V1.4: projection hides the status strip; the single teaching surface is
+    // CurrentInstruction, and the Inspector Drawer stays closed.
     await expect(page.getByTestId("status-bar")).toHaveCount(0);
+    await expect(page.getByTestId("current-instruction")).toBeVisible();
+    await expect(page.getByTestId("inspector-drawer")).toHaveCount(0);
     await assertVisualContract(page, snapshot);
     await screenshot(page, "07-projection-mode.png");
   });

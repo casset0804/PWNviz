@@ -4,19 +4,26 @@ import { useTranslation } from "react-i18next";
 import { parseAddress } from "../../lib/address";
 import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
 import {
-  STACK_MAP_FRAME_LABEL_WIDTH,
+  STACK_MAP_COLUMN_GROUP,
+  STACK_MAP_DIFF_GUTTER_WIDTH,
+  STACK_MAP_MARKER_GUTTER,
+  STACK_MAP_MARKER_LEFT,
   STACK_MAP_MAX_POINTER_LANES,
   STACK_MAP_POINTER_LANE,
   STACK_MAP_PX_PER_BYTE,
   STACK_MAP_RULER_WIDTH,
+  STACK_MAP_SPINE_LEFT,
+  STACK_MAP_SPINE_WIDTH,
   addressTop,
   assignPointerLanes,
   blockForAddress,
   buildStackMap,
+  groupMemoryChangesByAddress,
+  layoutChangeGroups,
   fitFramePxPerByte,
   fitStackPxPerByte,
-  pointerLaneWidth,
   zoomPercent,
+  type MemoryChangeGroup,
   type PointerLink,
   type StackMapBlock,
   type StackMapModel,
@@ -28,8 +35,6 @@ import { MemoryBlock } from "./MemoryBlock";
 import { PointerArrow } from "./PointerArrow";
 import { StackFrameCard } from "./StackFrameCard";
 import { StackPointerMarker } from "./StackPointerMarker";
-
-const MAP_LEFT = STACK_MAP_RULER_WIDTH + STACK_MAP_FRAME_LABEL_WIDTH;
 
 /**
  * Pick the most useful viewport top for a frame.
@@ -72,9 +77,9 @@ interface BandCardProps {
   reducedMotion: boolean;
   onSelectBlock: (block: StackMapBlock) => void;
   onHoverBlock: (block: StackMapBlock | null) => void;
-  rightInset: number;
 }
 
+/** A neutral band (below RSP / above frames) as a full-spine-width segment. */
 function BandCard({
   block,
   label,
@@ -86,47 +91,39 @@ function BandCard({
   reducedMotion,
   onSelectBlock,
   onHoverBlock,
-  rightInset,
 }: BandCardProps) {
   const localBlock = { ...block, top: 0 };
   return (
     <section
-      className="absolute right-0 z-[5] border-l-2 border-[#26384b] border-y border-y-[#162433]/70 bg-[#080e15]/60"
+      className="absolute left-0 right-0 z-[5]"
       style={{
-        left: STACK_MAP_RULER_WIDTH,
         top: block.top,
         height: Math.max(1, block.height),
       }}
       data-testid="stack-map-band"
       data-kind={block.kind}
     >
-      <div
-        className="grid h-full"
-        style={{ gridTemplateColumns: `${STACK_MAP_FRAME_LABEL_WIDTH}px minmax(0,1fr)` }}
+      <span
+        className="absolute left-1 top-1 z-10 rounded-[2px] border border-[#2b3d51] bg-[#0d1622]/95 px-1.5 py-0.5 text-[11px] leading-4 text-[#7d91a7]"
+        title={`${label} · ${hint}`}
       >
-        <div className="flex min-w-0 flex-col gap-1 border-r border-[#162433] bg-[#080e15]/80 p-3">
-          <span className="text-[13px] font-medium text-[#7d91a7]">{label}</span>
-          <span className="font-mono text-[12.5px] leading-4 text-[#5a6d82]">{hint}</span>
-        </div>
-        <div className="relative min-w-0">
-          <MemoryBlock
-            block={localBlock}
-            pointerLink={null}
-            targetLabel={null}
-            selected={selectedBlockId === block.id}
-            highlighted={false}
-            pxPerByte={pxPerByte}
-            snapshotId={snapshotId}
-            animationsEnabled={animationsEnabled}
-            reducedMotion={reducedMotion}
-            onSelect={onSelectBlock}
-            onHover={onHoverBlock}
-            onExpandTarget={null}
-            showLabel={false}
-            rightInset={rightInset}
-          />
-        </div>
-      </div>
+        {label}
+      </span>
+      <MemoryBlock
+        block={localBlock}
+        pointerLink={null}
+        targetLabel={null}
+        selected={selectedBlockId === block.id}
+        highlighted={false}
+        pxPerByte={pxPerByte}
+        snapshotId={snapshotId}
+        animationsEnabled={animationsEnabled}
+        reducedMotion={reducedMotion}
+        onSelect={onSelectBlock}
+        onHover={onHoverBlock}
+        onExpandTarget={null}
+        showLabel={false}
+      />
     </section>
   );
 }
@@ -146,6 +143,11 @@ interface HoverCardProps {
   /** Absolute content-space Y where the card should be anchored. */
   anchorTop: number;
   contentHeight: number;
+  /** Preferred X (right whitespace beyond the marker gutter). */
+  hoverPreferredLeft: number;
+  /** Left edge of the centered column group (for the left whitespace). */
+  groupLeftOffset: number;
+  contentWidth: number;
 }
 
 /**
@@ -156,7 +158,14 @@ interface HoverCardProps {
  * range and the ownership-evidence line. It is pointer-events-none so it can
  * never steal a click from the block underneath.
  */
-function BlockHoverCard({ block, anchorTop, contentHeight }: HoverCardProps) {
+function BlockHoverCard({
+  block,
+  anchorTop,
+  contentHeight,
+  hoverPreferredLeft,
+  groupLeftOffset,
+  contentWidth,
+}: HoverCardProps) {
   const { t } = useTranslation(["panels", "common"]);
   const node = block.variable;
   const cardHeightEstimate = 132;
@@ -191,7 +200,12 @@ function BlockHoverCard({ block, anchorTop, contentHeight }: HoverCardProps) {
       className="pointer-events-none absolute z-40 w-[330px] rounded-md border border-[#3a4f66] bg-[#0b1420]/97 p-3 shadow-[0_10px_32px_rgba(0,0,0,0.65)] backdrop-blur-[2px]"
       style={{
         top,
-        left: STACK_MAP_RULER_WIDTH + STACK_MAP_FRAME_LABEL_WIDTH + 12,
+        // Prefer the right whitespace beyond the marker gutter; when it is too
+        // narrow, use the left whitespace instead of covering the spine.
+        left:
+          hoverPreferredLeft + 346 <= contentWidth
+            ? hoverPreferredLeft
+            : Math.max(8, groupLeftOffset - 354),
       }}
       data-testid="stack-map-hover-card"
       data-block={block.id}
@@ -546,13 +560,28 @@ export function StackMapCanvas() {
     return assignPointerLanes(ordered, (entry) => entry.fromTop);
   }, [blockGeometry, model, selectedBlock, showAllPointers]);
 
-  const changedOutsideBlocks = useMemo(
+  // Unattributed changes (unknown/unreadable/no-block regions) live in the
+  // dedicated diff gutter — never as lines across the memory area.
+  const unattributedChangeGroups = useMemo(() => {
+    const unattributed = model.changeMarks.filter((mark) => {
+      const block = blockForAddress(model, mark.address);
+      return block === null || block.kind === "unknown" || block.kind === "unreadable";
+    });
+    return groupMemoryChangesByAddress(
+      unattributed.map((mark) => ({
+        address: mark.address,
+        before: mark.before,
+        after: mark.after,
+      })),
+    );
+  }, [model]);
+
+  const unattributedChangeLayouts = useMemo(
     () =>
-      model.changeMarks.filter((mark) => {
-        const block = blockForAddress(model, mark.address);
-        return block === null || block.kind === "unknown" || block.kind === "unreadable";
-      }),
-    [model],
+      model.windowEnd
+        ? layoutChangeGroups(unattributedChangeGroups, model.windowEnd, model.pxPerByte)
+        : [],
+    [unattributedChangeGroups, model.windowEnd, model.pxPerByte],
   );
 
   const targetLabelFor = useCallback(
@@ -688,6 +717,15 @@ export function StackMapCanvas() {
     [selectByte],
   );
 
+  // Clicking a change run opens the Inspector on its first byte; the detail
+  // panel renders the full Address|Before|After table for the run.
+  const handleSelectChangeGroup = useCallback(
+    (group: MemoryChangeGroup) => {
+      selectByte(group.start);
+    },
+    [selectByte],
+  );
+
   const handleExpandTarget = useCallback(
     (link: PointerLink) => {
       const fromBlock = model.blocks.find((block) => block.id === link.fromBlockId);
@@ -701,11 +739,23 @@ export function StackMapCanvas() {
     [model.blocks, jumpToPointer, selectByte, requestScroll],
   );
 
-  // Routing area grows with the number of actually drawn arrows.
-  const laneWidth = pointerLaneWidth(renderLinks.length);
-  const blockRight = contentWidth > 0 ? contentWidth - laneWidth : 0;
-  const laneRight = contentWidth > 0 ? contentWidth - 18 : 0;
-  const canDrawPointers = contentWidth > MAP_LEFT + 160;
+  // ---- V1.4 column-group geometry -----------------------------------------
+  // The group [ruler | diff gutter | spine | marker gutter] is centered in the
+  // work area; leftover space stays clean whitespace. Pointer arrows route in
+  // the right whitespace beyond the marker gutter.
+  const groupLeft = contentWidth > 0 ? Math.max(8, (contentWidth - STACK_MAP_COLUMN_GROUP) / 2) : 8;
+  const spineRightAbs = contentWidth > 0 ? groupLeft + STACK_MAP_MARKER_LEFT : 0;
+  const laneRight = contentWidth > 0 ? contentWidth - 12 : 0;
+  const laneZoneStart = spineRightAbs + STACK_MAP_MARKER_GUTTER + 12;
+  const maxLanes = Math.max(
+    1,
+    Math.min(
+      STACK_MAP_MAX_POINTER_LANES,
+      Math.floor((laneRight - laneZoneStart) / STACK_MAP_POINTER_LANE),
+    ),
+  );
+  const blockRight = spineRightAbs;
+  const canDrawPointers = contentWidth > groupLeft + STACK_MAP_MARKER_LEFT + 120;
   // Leaf functions: RSP === RBP at the frame base. The two 44px chips would
   // overlap in the ruler column and block each other, so shift the chips apart
   // (stub/guide lines keep their exact address rows).
@@ -743,6 +793,19 @@ export function StackMapCanvas() {
               data-testid="stack-map-changed-count"
             >
               {t("panels:stackMap.changedCount", { count: model.changedCount })}
+            </span>
+          ) : null}
+          {unattributedChangeGroups.length > 0 ? (
+            <span
+              className="rounded-sm border border-emerald-500/35 bg-emerald-500/[0.06] px-1.5 py-0.5 text-[11.5px] text-emerald-200"
+              title={`${t("panels:stackMap.unattributedChanges")}
+${unattributedChangeGroups
+                .map((group) => `${group.start} – ${group.end} (${group.count})`)
+                .join(", ")}`}
+              data-testid="stack-map-unattributed-count"
+            >
+              {t("panels:stackMap.unattributedChanges")} ·{" "}
+              {unattributedChangeGroups.reduce((total, group) => total + group.count, 0)}
             </span>
           ) : null}
           {model.unreadableCount > 0 ? (
@@ -966,119 +1029,185 @@ export function StackMapCanvas() {
             data-testid="stack-map-scroll"
           >
             <div
-              className="relative min-w-[720px]"
+              className="relative min-w-[620px]"
               ref={contentRef}
               style={{ height: Math.max(1, model.contentHeight) }}
             >
-              <AddressRuler ticks={model.rulerTicks} height={model.contentHeight} />
+              {/* Centered column group: ruler | diff gutter | memory spine |
+                  marker gutter. The spine never stretches with the container;
+                  leftover space stays clean whitespace. */}
+              <div
+                className="absolute bottom-0 top-0"
+                style={{ left: groupLeft, width: STACK_MAP_COLUMN_GROUP }}
+                data-testid="stack-map-column-group"
+              >
+                <AddressRuler ticks={model.rulerTicks} height={model.contentHeight} />
 
-              {model.aboveFrames ? (
-                <BandCard
-                  block={model.aboveFrames}
-                  label={t("panels:stackMap.aboveFrames")}
-                  hint={`${model.aboveFrames.start} .. ${model.aboveFrames.end}`}
-                  selectedBlockId={selectedBlockId}
-                  snapshotId={snapshotId}
-                  pxPerByte={model.pxPerByte}
-                  animationsEnabled={animationsEnabled}
-                  reducedMotion={reducedMotion}
-                  onSelectBlock={handleSelectBlock}
-                  onHoverBlock={handleHoverBlock}
-                  rightInset={laneWidth}
-                />
-              ) : null}
-
-              {model.frames
-                .slice()
-                .reverse()
-                .map((frame) => (
-                  <StackFrameCard
-                    key={`frame:${frame.level}`}
-                    frame={frame}
-                    snapshotId={snapshotId}
-                    pxPerByte={model.pxPerByte}
-                    selectedBlockId={selectedBlockId}
-                    highlightedBlockIds={highlightedBlockIds}
-                    pointerTargetBlockIds={pointerTargetBlockIds}
-                    rightInset={laneWidth}
-                    animationsEnabled={animationsEnabled}
-                    reducedMotion={reducedMotion}
-                    pointerLinkFor={(block) => linksByFrom.get(block.id)?.[0] ?? null}
-                    targetLabelFor={targetLabelFor}
-                    onSelectBlock={handleSelectBlock}
-                    onHoverBlock={handleHoverBlock}
-                    onExpandTarget={handleExpandTarget}
-                  />
-                ))}
-
-              {model.belowRsp ? (
-                <BandCard
-                  block={model.belowRsp}
-                  label={t("panels:stackMap.belowRsp")}
-                  hint={`${model.belowRsp.start} .. ${model.belowRsp.end}`}
-                  selectedBlockId={selectedBlockId}
-                  snapshotId={snapshotId}
-                  pxPerByte={model.pxPerByte}
-                  animationsEnabled={animationsEnabled}
-                  reducedMotion={reducedMotion}
-                  onSelectBlock={handleSelectBlock}
-                  onHoverBlock={handleHoverBlock}
-                  rightInset={laneWidth}
-                />
-              ) : null}
-
-              {/* In-window variables whose address lies outside every drawn
-                  frame: drawn at their true address, ownership unverified. */}
-              {model.unframedBlocks.length > 0 ? (
+                {/* Diff gutter: unattributed change runs as 4 px markers. */}
                 <div
-                  className="absolute right-0 z-[15]"
-                  style={{ left: MAP_LEFT, top: 0, height: Math.max(1, model.contentHeight) }}
-                  data-testid="stack-map-unframed"
+                  className="absolute top-0 z-[12] border-r border-[#141f2b] bg-[#060b11]"
+                  style={{
+                    left: STACK_MAP_RULER_WIDTH,
+                    width: STACK_MAP_DIFF_GUTTER_WIDTH,
+                    height: Math.max(1, model.contentHeight),
+                  }}
+                  data-testid="stack-map-diff-gutter"
                 >
-                  {model.unframedBlocks.map((block) => (
-                    <MemoryBlock
-                      key={block.id}
-                      block={block}
-                      pointerLink={linksByFrom.get(block.id)?.[0] ?? null}
-                      targetLabel={null}
-                      selected={selectedBlockId === block.id}
-                      highlighted={highlightedBlockIds.has(block.id)}
-                      pointerTarget={pointerTargetBlockIds.has(block.id)}
-                      rightInset={laneWidth}
-                      pxPerByte={model.pxPerByte}
-                      snapshotId={snapshotId}
-                      animationsEnabled={animationsEnabled}
-                      reducedMotion={reducedMotion}
-                      onSelect={handleSelectBlock}
-                      onHover={handleHoverBlock}
-                      onExpandTarget={null}
-                      showLabel={false}
+                  {unattributedChangeLayouts.map(({ group, top, height }) => (
+                    <button
+                      key={group.start}
+                      type="button"
+                      data-testid="stack-map-diff-gutter-mark"
+                      data-start={group.start}
+                      data-end={group.end}
+                      data-count={group.count}
+                      data-width={4}
+                      title={`${group.start} - ${group.end}, ${group.count} changed bytes`}
+                      aria-label={`${group.start} - ${group.end}, ${group.count} changed bytes`}
+                      onClick={() => handleSelectChangeGroup(group)}
+                      className="absolute left-[3px] w-[4px] cursor-pointer rounded-[1px] bg-emerald-600/60 transition-colors hover:bg-emerald-400/90"
+                      style={{ top, height }}
                     />
                   ))}
                 </div>
-              ) : null}
+
+                {/* The memory spine: fixed width, real byte height. Frames and
+                    bands are vertical segments of this column. */}
+                <div
+                  className="absolute top-0 border-x border-[#16232f] bg-[#080d13]"
+                  style={{
+                    left: STACK_MAP_SPINE_LEFT,
+                    width: STACK_MAP_SPINE_WIDTH,
+                    height: Math.max(1, model.contentHeight),
+                  }}
+                  data-testid="stack-map-spine"
+                >
+                  {model.aboveFrames ? (
+                    <BandCard
+                      block={model.aboveFrames}
+                      label={t("panels:stackMap.aboveFrames")}
+                      hint={`${model.aboveFrames.start} .. ${model.aboveFrames.end}`}
+                      selectedBlockId={selectedBlockId}
+                      snapshotId={snapshotId}
+                      pxPerByte={model.pxPerByte}
+                      animationsEnabled={animationsEnabled}
+                      reducedMotion={reducedMotion}
+                      onSelectBlock={handleSelectBlock}
+                      onHoverBlock={handleHoverBlock}
+                    />
+                  ) : null}
+
+                  {model.frames
+                    .slice()
+                    .reverse()
+                    .map((frame) => (
+                      <StackFrameCard
+                        key={`frame:${frame.level}`}
+                        frame={frame}
+                        snapshotId={snapshotId}
+                        pxPerByte={model.pxPerByte}
+                        onSelectChangeGroup={handleSelectChangeGroup}
+                        selectedBlockId={selectedBlockId}
+                        highlightedBlockIds={highlightedBlockIds}
+                        pointerTargetBlockIds={pointerTargetBlockIds}
+                        animationsEnabled={animationsEnabled}
+                        reducedMotion={reducedMotion}
+                        pointerLinkFor={(block) => linksByFrom.get(block.id)?.[0] ?? null}
+                        targetLabelFor={targetLabelFor}
+                        onSelectBlock={handleSelectBlock}
+                        onHoverBlock={handleHoverBlock}
+                        onExpandTarget={handleExpandTarget}
+                        onFocusFrame={focusFrameByLevel}
+                      />
+                    ))}
+
+                  {model.belowRsp ? (
+                    <BandCard
+                      block={model.belowRsp}
+                      label={t("panels:stackMap.belowRsp")}
+                      hint={`${model.belowRsp.start} .. ${model.belowRsp.end}`}
+                      selectedBlockId={selectedBlockId}
+                      snapshotId={snapshotId}
+                      pxPerByte={model.pxPerByte}
+                      animationsEnabled={animationsEnabled}
+                      reducedMotion={reducedMotion}
+                      onSelectBlock={handleSelectBlock}
+                      onHoverBlock={handleHoverBlock}
+                    />
+                  ) : null}
+
+                  {/* In-window variables outside every drawn frame: drawn at
+                      their true address, ownership unverified. */}
+                  {model.unframedBlocks.length > 0 ? (
+                    <div
+                      className="pointer-events-none absolute left-0 right-0 top-0 z-[15]"
+                      style={{ height: Math.max(1, model.contentHeight) }}
+                      data-testid="stack-map-unframed"
+                    >
+                      {model.unframedBlocks.map((block) => (
+                        <MemoryBlock
+                          key={block.id}
+                          block={block}
+                          pointerLink={linksByFrom.get(block.id)?.[0] ?? null}
+                          targetLabel={null}
+                          selected={selectedBlockId === block.id}
+                          highlighted={highlightedBlockIds.has(block.id)}
+                          pointerTarget={pointerTargetBlockIds.has(block.id)}
+                          pxPerByte={model.pxPerByte}
+                          onSelectChangeGroup={handleSelectChangeGroup}
+                          snapshotId={snapshotId}
+                          animationsEnabled={animationsEnabled}
+                          reducedMotion={reducedMotion}
+                          onSelect={handleSelectBlock}
+                          onHover={handleHoverBlock}
+                          onExpandTarget={null}
+                          showLabel={false}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+
+                {model.rsp && model.rspTop !== null ? (
+                  <StackPointerMarker
+                    kind="RSP"
+                    address={model.rsp}
+                    top={model.rspTop}
+                    changed={changedRegisters.includes("rsp")}
+                    reducedMotion={reducedMotion}
+                    onFocus={focusAddress}
+                    variant={workbenchMode === "developer" ? "developer" : "presentation"}
+                    chipOffsetY={rspChipOffset}
+                    guideVisible={guideKind === "RSP"}
+                    onToggleGuide={() => showGuide("RSP")}
+                  />
+                ) : null}
+                {model.rbp && model.rbpTop !== null ? (
+                  <StackPointerMarker
+                    kind="RBP"
+                    address={model.rbp}
+                    top={model.rbpTop}
+                    changed={changedRegisters.includes("rbp")}
+                    reducedMotion={reducedMotion}
+                    onFocus={focusAddress}
+                    variant={workbenchMode === "developer" ? "developer" : "presentation"}
+                    chipOffsetY={rbpChipOffset}
+                    guideVisible={guideKind === "RBP"}
+                    onToggleGuide={() => showGuide("RBP")}
+                  />
+                ) : null}
+              </div>
 
               {hoveredBlock ? (
                 <BlockHoverCard
                   block={hoveredBlock}
                   anchorTop={(blockGeometry.get(hoveredBlock.id)?.top ?? 0) + hoveredBlock.height / 2}
                   contentHeight={model.contentHeight}
+                  hoverPreferredLeft={groupLeft + STACK_MAP_MARKER_LEFT + STACK_MAP_MARKER_GUTTER + 16}
+                  groupLeftOffset={groupLeft}
+                  contentWidth={contentWidth}
                 />
               ) : null}
-
-              {changedOutsideBlocks.map((mark) => (
-                <span
-                  key={`change:${mark.address}`}
-                  className="pointer-events-none absolute z-20 h-[2px] bg-emerald-400/80"
-                  style={{
-                    top: mark.top,
-                    left: MAP_LEFT,
-                    right: laneWidth,
-                    boxShadow: "0 0 6px rgba(110,231,183,0.55)",
-                  }}
-                  title={`${mark.address}: ${mark.before ?? "?"} → ${mark.after ?? "?"}`}
-                />
-              ))}
 
               {canDrawPointers ? (
                 <svg
@@ -1087,7 +1216,7 @@ export function StackMapCanvas() {
                   height={model.contentHeight}
                   aria-hidden="true"
                 >
-                  {renderLinks.map(({ link, fromTop, toTop, laneIndex }) => (
+                  {renderLinks.slice(0, maxLanes).map(({ link, fromTop, toTop, laneIndex }) => (
                     <PointerArrow
                       key={link.id}
                       link={link}
@@ -1105,35 +1234,6 @@ export function StackMapCanvas() {
                     />
                   ))}
                 </svg>
-              ) : null}
-
-              {model.rsp && model.rspTop !== null ? (
-                <StackPointerMarker
-                  kind="RSP"
-                  address={model.rsp}
-                  top={model.rspTop}
-                  changed={changedRegisters.includes("rsp")}
-                  reducedMotion={reducedMotion}
-                  onFocus={focusAddress}
-                  variant={workbenchMode === "developer" ? "developer" : "presentation"}
-                  chipOffsetY={rspChipOffset}
-                  guideVisible={guideKind === "RSP"}
-                  onToggleGuide={() => showGuide("RSP")}
-                />
-              ) : null}
-              {model.rbp && model.rbpTop !== null ? (
-                <StackPointerMarker
-                  kind="RBP"
-                  address={model.rbp}
-                  top={model.rbpTop}
-                  changed={changedRegisters.includes("rbp")}
-                  reducedMotion={reducedMotion}
-                  onFocus={focusAddress}
-                  variant={workbenchMode === "developer" ? "developer" : "presentation"}
-                  chipOffsetY={rbpChipOffset}
-                  guideVisible={guideKind === "RBP"}
-                  onToggleGuide={() => showGuide("RBP")}
-                />
               ) : null}
             </div>
           </div>
