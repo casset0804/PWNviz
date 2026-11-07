@@ -6,7 +6,7 @@
  * unreachable the suites fail.
  */
 
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 export const API = (process.env.PWNVIZ_API_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 
@@ -49,6 +49,7 @@ export interface SnapshotDiff {
 export interface SessionInfo {
   session_id: string;
   state: string;
+  sample_id: string;
 }
 
 let activeSession: string | null = null;
@@ -152,6 +153,63 @@ export function addressInWindow(address: string | null, snapshot: Snapshot): boo
   const start = snapshot.stack.range_start ? BigInt(snapshot.stack.range_start) : null;
   const end = snapshot.stack.range_end ? BigInt(snapshot.stack.range_end) : null;
   return start !== null && end !== null && value >= start && value < end;
+}
+
+export interface SampleSource {
+  sample_id: string;
+  source_file: string;
+  language: string;
+  content: string;
+  line_count: number;
+  truncated: boolean;
+}
+
+/**
+ * Wait until the left panel shows the REAL source (V1.4.1).
+ *
+ * Screenshots must never capture the "loading source" state, and a failed
+ * backend request must FAIL the test instead of quietly passing:
+ *
+ *  1. the source panel becomes visible;
+ *  2. the API itself is verified first (status, non-empty content, line count)
+ *     so a broken backend request fails loudly;
+ *  3. the loading indicator must disappear;
+ *  4. at least one real source line renders and the file name is non-empty.
+ *
+ * A sample that genuinely has no source file would surface the real
+ * `source-error` state; the caller can assert that explicitly instead.
+ */
+export async function waitForSourceReady(page: Page, sampleId?: string): Promise<void> {
+  await expect(page.getByTestId("source-disassembly-panel")).toBeVisible();
+  await expect(page.getByTestId("source-panel")).toBeVisible();
+
+  if (sampleId) {
+    const source = await api<SampleSource>(`/api/v1/samples/${sampleId}/source`);
+    if (!source.content || source.content.trim().length === 0) {
+      throw new Error(`source API returned empty content for ${sampleId}`);
+    }
+    if (source.line_count <= 0) {
+      throw new Error(`source API reported ${source.line_count} lines for ${sampleId}`);
+    }
+    const apiLines = source.content.split("\n").length;
+    if (apiLines < 1) {
+      throw new Error(`source content decode failed for ${sampleId}`);
+    }
+  }
+
+  // The loading indicator must go away — loading is never a pass condition.
+  await expect(page.getByTestId("source-loading")).toHaveCount(0, { timeout: 20_000 });
+
+  // Real rendered lines plus a real file name.
+  await expect(page.getByTestId("source-line").first()).toBeVisible({ timeout: 20_000 });
+  const lineCount = await page.getByTestId("source-line").count();
+  if (lineCount <= 0) {
+    throw new Error("no source lines rendered");
+  }
+  const fileName = (await page.getByTestId("source-file-name").textContent()) ?? "";
+  if (!fileName.trim() || fileName.includes("正在读取")) {
+    throw new Error(`source file name not ready: "${fileName}"`);
+  }
 }
 
 /** Best-effort cleanup of the session created by the current test. */

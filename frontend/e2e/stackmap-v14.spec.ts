@@ -19,6 +19,7 @@ import {
   preparePresentation,
   stepOnce,
   stepUntil,
+  waitForSourceReady,
   type Snapshot,
 } from "./gdb";
 
@@ -160,6 +161,7 @@ test.describe("V1.4 stack-centric layout (real GDB)", () => {
     const snapshot = await enterFunction(session.session_id, "add_numbers");
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     await assertLayoutContract(page, snapshot);
     // Selecting a block opens the Inspector Drawer with real memory data.
     await page.locator('[data-testid=stack-map-block][data-kind="variable"]').first().click();
@@ -177,6 +179,7 @@ test.describe("V1.4 stack-centric layout (real GDB)", () => {
     );
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     await assertLayoutContract(page, snapshot);
     const frames = await page.locator("[data-testid=stack-frame-card]").count();
     expect(frames).toBeGreaterThanOrEqual(2);
@@ -188,6 +191,7 @@ test.describe("V1.4 stack-centric layout (real GDB)", () => {
     const snapshot = await enterFunction(session.session_id, "mix_all");
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     await assertLayoutContract(page, snapshot);
     const variables = await page.locator('[data-testid=stack-map-block][data-kind="variable"]').count();
     expect(variables).toBeGreaterThanOrEqual(8);
@@ -204,6 +208,7 @@ test.describe("V1.4 stack-centric layout (real GDB)", () => {
     });
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     await assertLayoutContract(page, snapshot);
     await screenshot(page, "04-stack-overflow.png");
   });
@@ -217,8 +222,53 @@ test.describe("V1.4 stack-centric layout (real GDB)", () => {
     );
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     await assertLayoutContract(page, snapshot);
     await screenshot(page, "05-no-dwarf.png");
+  });
+
+  test("7. exactly ONE teaching surface; Inspector carries no explanation", async ({ page }) => {
+    const session = await createLaunchedSession("stack-basic");
+    await enterFunction(session.session_id, "add_numbers");
+    await preparePresentation(page);
+    await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
+
+    // Initial state: exactly one CurrentInstruction, no drawer, no old panel.
+    await expect(page.getByTestId("current-instruction")).toHaveCount(1);
+    await expect(page.getByTestId("teaching-panel")).toHaveCount(0);
+    await expect(page.getByTestId("inspector-drawer")).toHaveCount(0);
+
+    // Selecting a variable opens the Inspector...
+    await page.locator('[data-testid=stack-map-block][data-kind="variable"]').first().click();
+    await expect(page.getByTestId("inspector-drawer")).toBeVisible();
+    // ...and there is STILL only one teaching explanation area (CurrentInstruction).
+    await expect(page.getByTestId("current-instruction")).toHaveCount(1);
+    await expect(page.getByTestId("teaching-panel")).toHaveCount(0);
+    const drawer = page.getByTestId("inspector-drawer");
+    const drawerText = (await drawer.textContent()) ?? "";
+    // The drawer must not repeat the execution explanation headline surface.
+    expect(drawerText).not.toContain("本步讲解");
+    expect(await page.locator("text=本步讲解").count()).toBe(0);
+    // Memory evidence is present instead.
+    await expect(page.getByTestId("selected-changes-table").or(page.getByTestId("selected-block-detail"))).toBeVisible();
+  });
+
+  test("8. DeveloperWorkbench keeps its BottomDock untouched", async ({ page }) => {
+    const session = await createLaunchedSession("stack-basic");
+    await enterFunction(session.session_id, "add_numbers");
+    await preparePresentation(page);
+    await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
+    await page.locator('[data-testid=stack-map-block][data-kind="variable"]').first().click();
+    await expect(page.getByTestId("inspector-drawer")).toBeVisible();
+
+    await page.getByTestId("mode-developer").click();
+    await expect(page.getByTestId("developer-workbench")).toBeVisible();
+    await expect(page.getByTestId("bottom-dock")).toBeVisible();
+    // The presentation-only drawer is gone in developer mode.
+    await expect(page.getByTestId("inspector-drawer")).toHaveCount(0);
+    await expect(page.getByTestId("teaching-panel")).toHaveCount(0);
   });
 
   test("6. no-frame-pointer sample", async ({ page }) => {
@@ -230,6 +280,7 @@ test.describe("V1.4 stack-centric layout (real GDB)", () => {
     );
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     await assertLayoutContract(page, snapshot);
     await screenshot(page, "06-no-frame-pointer.png");
   });

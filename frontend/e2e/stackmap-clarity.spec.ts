@@ -16,6 +16,7 @@ import {
   createLaunchedSession,
   openSession,
   preparePresentation,
+  waitForSourceReady,
   stepOnce,
   stepUntil,
   type Snapshot,
@@ -45,6 +46,7 @@ test.describe("stackmap visual clarity (real GDB)", () => {
     const snapshot = await enterFunction(session.session_id, "add_numbers");
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     await assertCommon(page, snapshot);
     await screenshot(page, "01-normal-frame.png");
   });
@@ -59,6 +61,7 @@ test.describe("stackmap visual clarity (real GDB)", () => {
     );
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     await assertCommon(page, snapshot);
     const frames = await page.locator("[data-testid=stack-frame-card]").count();
     expect(frames).toBeGreaterThanOrEqual(2);
@@ -77,6 +80,7 @@ test.describe("stackmap visual clarity (real GDB)", () => {
     );
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     // Show every real relation, then verify the lanes.
     await page.getByTestId("show-all-pointers").click();
     await expect(page.getByTestId("show-all-pointers")).toHaveAttribute("aria-pressed", "true");
@@ -113,6 +117,7 @@ test.describe("stackmap visual clarity (real GDB)", () => {
     );
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     // No selection -> no pointer routing at all.
     let arrows = await page.locator("[data-testid=stack-map-pointer-arrow]").count();
     expect(arrows).toBe(0);
@@ -128,6 +133,7 @@ test.describe("stackmap visual clarity (real GDB)", () => {
     const snapshot = await enterFunction(session.session_id, "mix_all");
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     const variables = await page.locator('[data-testid=stack-map-block][data-kind="variable"]').count();
     expect(variables).toBeGreaterThanOrEqual(8);
     await assertCommon(page, snapshot);
@@ -143,6 +149,7 @@ test.describe("stackmap visual clarity (real GDB)", () => {
     ).catch(() => stepUntil(session.session_id, (s) => s.frames.length >= 1 && (s.instruction?.text ?? "").length > 0, 50));
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     // The UI must render exactly what the real GDB session reports — never
     // invent variable blocks. Without DWARF, GDB can still identify spilled
     // arguments from the prologue; those ARE real GDB data. Variables whose
@@ -168,6 +175,7 @@ test.describe("stackmap visual clarity (real GDB)", () => {
     );
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     await assertCommon(page, snapshot);
     await screenshot(page, "06-no-frame-pointer.png");
   });

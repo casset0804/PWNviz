@@ -19,6 +19,7 @@ import {
   preparePresentation,
   stepOnce,
   stepUntil,
+  waitForSourceReady,
   type Snapshot,
 } from "./gdb";
 
@@ -190,6 +191,7 @@ test.describe("presentation visual regression (real GDB)", () => {
     );
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     await expect(page.getByTestId("stack-frame-card").first()).toBeVisible();
     await assertVisualContract(page, snapshot);
     await screenshot(page, "01-main-calls-add_numbers.png");
@@ -206,6 +208,7 @@ test.describe("presentation visual regression (real GDB)", () => {
     const snapshot = await stepOnce(session.session_id); // push rbp executed
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     await assertVisualContract(page, snapshot);
     await screenshot(page, "02-after-push-rbp.png");
   });
@@ -227,6 +230,7 @@ test.describe("presentation visual regression (real GDB)", () => {
     const snapshot = await stepUntil(session.session_id, initialised);
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     const variableBlocks = await page.locator('[data-testid=stack-map-block][data-kind=variable]').count();
     expect(variableBlocks).toBeGreaterThanOrEqual(3);
     await assertVisualContract(page, snapshot);
@@ -241,6 +245,7 @@ test.describe("presentation visual regression (real GDB)", () => {
     );
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     await assertVisualContract(page, snapshot);
     await screenshot(page, "04-before-return.png");
   });
@@ -254,6 +259,7 @@ test.describe("presentation visual regression (real GDB)", () => {
     );
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     // No DWARF -> the UI must not invent variable blocks.
     const variableBlocks = await page.locator('[data-testid=stack-map-block][data-kind=variable]').count();
     expect(variableBlocks).toBe(0);
@@ -273,6 +279,7 @@ test.describe("presentation visual regression (real GDB)", () => {
     );
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     await assertVisualContract(page, snapshot);
     // The boundary cannot be proven without RBP; the UI must say so.
     const unverified = await page
@@ -299,6 +306,7 @@ test.describe("presentation visual regression (real GDB)", () => {
     );
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     await page.getByTestId("projection-toggle").click();
     await expect(page.getByTestId("projection-toggle")).toHaveAttribute("aria-pressed", "true");
     // V1.4: projection hides the status strip; the single teaching surface is

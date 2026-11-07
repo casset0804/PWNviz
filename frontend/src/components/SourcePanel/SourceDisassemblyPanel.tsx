@@ -115,7 +115,10 @@ export function SourceDisassemblyPanel({
           <h2 className="text-[19px] font-semibold text-[#edf5fd]">
             {tab === "source" ? t("panels:source.title") : t("panels:disassembly.title")}
           </h2>
-          <span className="ml-auto truncate font-mono text-[11.5px] text-[#5f7388]">
+          <span
+            className="ml-auto truncate font-mono text-[11.5px] text-[#5f7388]"
+            data-testid="source-file-name"
+          >
             {tab === "source"
               ? source?.source_file
                 ? basename(source.source_file)
@@ -170,10 +173,12 @@ export function SourceDisassemblyPanel({
         {tab === "source" ? (
           <div className="h-full min-h-0 overflow-auto" data-testid="source-panel" ref={sourceScrollRef}>
             {loading ? (
-              <p className="p-4 text-[14px] text-[#7f93a8]">{t("panels:source.loading")}</p>
+              <p className="p-4 text-[14px] text-[#7f93a8]" data-testid="source-loading">
+                {t("panels:source.loading")}
+              </p>
             ) : null}
             {!loading && error ? (
-              <div className="space-y-2 p-4">
+              <div className="space-y-2 p-4" data-testid="source-error">
                 <p className="rounded-md border border-amber-500/35 bg-amber-500/[0.06] px-3 py-2 text-[14px] text-amber-200">
                   {t("panels:source.unavailable")}
                 </p>

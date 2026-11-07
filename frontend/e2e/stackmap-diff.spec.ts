@@ -15,6 +15,7 @@ import {
   latestSnapshot,
   openSession,
   preparePresentation,
+  waitForSourceReady,
   stepUntil,
   type Snapshot,
 } from "./gdb";
@@ -148,6 +149,7 @@ test.describe("stackmap diff cleanness (real GDB)", () => {
     await stepUntil(session.session_id, (s) => s.diff.changed_bytes.length === 1, 600);
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     // The UI renders the session's LATEST snapshot; assert against that.
     const snapshot = await latestSnapshot(session.session_id);
     await assertDiffCleanliness(page);
@@ -174,6 +176,7 @@ test.describe("stackmap diff cleanness (real GDB)", () => {
     );
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     const snapshot = await latestSnapshot(session.session_id);
     await assertDiffCleanliness(page);
     // Exactly one merged mark covering the whole run (plus no per-byte marks).
@@ -208,6 +211,7 @@ test.describe("stackmap diff cleanness (real GDB)", () => {
     );
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     const snapshot = await latestSnapshot(session.session_id);
     const groups = groupChanges(snapshot.diff.changed_bytes);
     expect(groups.length).toBeGreaterThanOrEqual(3);
@@ -233,6 +237,7 @@ test.describe("stackmap diff cleanness (real GDB)", () => {
     );
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     const snapshot = await latestSnapshot(session.session_id);
     const unattributed = unattributedGroups(snapshot);
     expect(unattributed.length).toBeGreaterThanOrEqual(1);
@@ -281,6 +286,7 @@ test.describe("stackmap diff cleanness (real GDB)", () => {
     await stepUntil(session.session_id, (s) => s.diff.changed_bytes.length === 8, 600);
     await preparePresentation(page);
     await openSession(page, session.session_id);
+    await waitForSourceReady(page, session.sample_id);
     const snapshot = await latestSnapshot(session.session_id);
     const firstChange = snapshot.diff.changed_bytes[0];
     // Click the block's change mark (the run's first byte).

@@ -2,7 +2,6 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 import { normalizeAddress, parseAddress } from "../../lib/address";
-import { explainStep, type Translate } from "../../lib/explain";
 import {
   blockAscii,
   blockForAddress,
@@ -26,25 +25,19 @@ function formatBytes(bytes: Array<string | null>, limit = 32) {
  * here as an overlay when a memory block (or change run) is selected, and
  * closes without taking permanent space. DeveloperWorkbench keeps its full
  * BottomDock instead.
+ *
+ * V1.4.1: deliberately NO execution explanation in here. CurrentInstruction
+ * is the single teaching surface; this drawer only holds memory evidence.
  */
 export function InspectorDrawer() {
-  const { t } = useTranslation(["panels", "explanation", "common"]);
+  // V1.4.1: the drawer carries NO execution explanation — CurrentInstruction
+  // is the single teaching surface. Only memory evidence lives here.
+  const { t } = useTranslation(["panels"]);
   const snapshot = useDebugStore((state) => state.snapshot);
-  const previousSnapshot = useDebugStore((state) => state.previousSnapshot);
-  const lastAction = useDebugStore((state) => state.lastAction);
   const selectedByteAddress = useDebugStore((state) => state.selectedByteAddress);
   const selectByte = useDebugStore((state) => state.selectByte);
   const clearByteSelection = useDebugStore((state) => state.clearByteSelection);
   const pointerTarget = useDebugStore((state) => state.pointerTarget);
-
-  const translate = useMemo<Translate>(
-    () => (key, params) => String(t(`explanation:${key}`, (params ?? {}) as never)),
-    [t],
-  );
-  const explanation = useMemo(
-    () => explainStep(previousSnapshot, snapshot, lastAction, translate),
-    [previousSnapshot, snapshot, lastAction, translate],
-  );
 
   const model = useMemo(() => buildStackMap(snapshot), [snapshot]);
   const selectedBlock = blockForAddress(model, selectedByteAddress);
@@ -259,26 +252,6 @@ export function InspectorDrawer() {
           )}
         </section>
 
-        {/* 4. One-line verified explanation for the just-executed step. */}
-        <section className="mt-3 border-t border-[#16232f] pt-2.5">
-          <div className="flex items-center gap-2">
-            <h3 className="text-[13px] font-semibold text-[#dbeaf7]">{t("panels:teaching.title")}</h3>
-            <span
-              className={`rounded-sm border px-1.5 py-0.5 text-[11px] ${
-                explanation.matched && previousSnapshot
-                  ? "border-emerald-500/40 bg-emerald-500/[0.07] text-emerald-200"
-                  : "border-amber-500/35 bg-amber-500/[0.06] text-amber-200"
-              }`}
-            >
-              {explanation.matched && previousSnapshot
-                ? t("panels:teaching.verified")
-                : t("panels:teaching.unverified")}
-            </span>
-          </div>
-          <p className="mt-1 text-[13px] leading-5 text-[#dbeaf7]">
-            {previousSnapshot ? explanation.headline : t("panels:teaching.noChange")}
-          </p>
-        </section>
       </div>
     </aside>
   );

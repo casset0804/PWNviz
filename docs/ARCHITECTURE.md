@@ -1,6 +1,6 @@
 # 架构设计
 
-本文档区分**已实现（Phase 0）**与**计划中（Phase 1+）**，避免把设计当成现状。
+本文档描述**当前已实现**的真实架构（V1.4），避免把设计当成现状。
 
 ## 1. 进程与信任边界
 
@@ -13,10 +13,10 @@
 ┌───────────────────────────────▼──────────────────────────────────────┐
 │  WSL2 Ubuntu 22.04                                                   │
 │  FastAPI (uvicorn 127.0.0.1:8000)                                    │
-│    api/  ── sessions/（Phase 1）                                     │
+│    api/  ── sessions/                                               │
 │                    │                                                 │
 │                    ▼                                                 │
-│           持久 GDB/MI3 子进程（pygdbmi，Phase 1）                     │
+│           持久 GDB/MI3 子进程（pygdbmi）                             │
 │                    │ ptrace                                           │
 │                    ▼                                                 │
 │           教学 ELF 进程（x86-64，本机可信）                            │
@@ -27,10 +27,10 @@
 
 - 浏览器从不直接执行 GDB，也从不解析 GDB 文本；
 - 后端是唯一能创建进程、发送 MI 命令的角色；
-- 调试目标是本机教学样例，Phase 0/1 不接受任意路径的 ELF 上传；
+- 调试目标是本机教学样例，不接受任意路径的 ELF 上传；
 - 前端只消费结构化 JSON，地址与 64-bit 值以十六进制字符串传输。
 
-## 2. 已实现模块（Phase 0 + Phase 1）
+## 2. 已实现模块
 
 ### 2.1 后端
 
@@ -224,7 +224,38 @@ Address|Before|After 表格）；全宽横线绘制方式已删除。
 `frontend/e2e/gdb.ts`。运行 `scripts/run_visual_tests.sh`
 （WSL 后端 + Vite + Playwright）。
 
-## 3. Phase 1 调试链路（已实现）
+### 2.5 V1.4 以栈为中心的演示布局（已实现）
+
+**PresentationWorkbench**：三栏 `minmax(340px,26fr) / minmax(620px,56fr) /
+minmax(260px,18fr)`（1920×1080 下源码/汇编、StackMap 工作区、核心寄存器
+≈ 26/56/18）；<1280px 时寄存器折叠为 `<details>`；无固定底部面板。
+
+**StackMapCanvas 列组**（居中，宽度固定 580px）：
+
+```text
+┌────────────┬──────┬────────────────────────────┬──────────┐
+│ 地址标尺    │ Diff │        内存柱 (Spine)       │ RSP/RBP  │
+│   160px    │ 12px │         320px (≤360)        │  88px    │
+│ 左对齐地址  │ 未归属 │ 帧纵向段 / 变量块 / 返回地址 │ 短箭头   │
+└────────────┴──────┴────────────────────────────┴──────────┘
+        groupLeft = max(8, (contentWidth − 580) / 2)
+```
+
+- 真实字节几何只映射高度（`addressTop()` 单一坐标函数）；柱宽固定，
+  不随容器拉伸，两侧留白；指针箭头路由到列组右侧留白（lane 数随宽度自适应）；
+- **StackFrameCard** = 柱内纵向段：顶部小型函数名标签（current 青色 /
+  verified 次级 / warning 琥珀，点击定位）、变量块、saved RBP、返回地址；
+  微变量芯片叠柱左缘（`layoutGutterAnnotations` 防重叠）；
+- **RSP/RBP 标记**（`StackPointerMarker`）在柱右侧 88px 区：短箭头指向
+  真实地址行，点击定位；RSP===RBP 时标签错开、锚点不动；跨柱横线仅在
+  developer 模式或用户点击后临时出现；
+- **InspectorDrawer**：选中内存块/变化区时从右侧浮出（不占常驻空间），
+  承载内存 diff、选中块详情（类型/大小/`rbp-0x14` 偏移/原始字节 32/
+  QWORD/ASCII/指针目标）与 Address|Before|After 表格；
+  **不含执行解释** —— CurrentInstruction 是唯一教学解释表面
+  （指令/地址/函数/一句实测结果）；DeveloperWorkbench 保留完整 BottomDock。
+
+## 3. 调试链路（已实现）
 
 ```text
 app/debugger/
@@ -273,7 +304,7 @@ app/api/websocket.py         /api/v1/sessions/{id}/stream
   （`reason="breakpoint-hit"`）；
 - 因此“命令返回后才可能收到 stopped”和“命令返回就代表已停止”两种假设都不成立。
 
-Phase 1 的 MI controller 必须：
+MI controller 的硬性要求：
 
 1. 为每条命令建立 future，按命令序号/token 关联 `^done` / `^error`；
 2. 异步记录（`*running`、`*stopped`、`=thread-group-exited`）单独分发，即使它比
@@ -403,7 +434,7 @@ V1.1 起默认用**一条** `-data-read-memory-bytes` 读取整个 0x200 窗口
 
 ## 4. 前后端协议
 
-Phase 1 已提供 REST + WebSocket：
+REST + WebSocket（已实现）：
 
 | type | payload | 状态 |
 |---|---|---|
